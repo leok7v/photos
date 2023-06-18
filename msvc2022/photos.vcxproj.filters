@@ -17,11 +17,14 @@
     <ClCompile Include="..\quick.c" />
     <ClCompile Include="..\crt.c" />
     <ClCompile Include="..\re.c" />
+    <ClCompile Include="..\exif.c" />
+    <ClCompile Include="..\files.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\samples\version.h" />
     <ClInclude Include="..\crt.h" />
     <ClInclude Include="..\quick.h" />
     <ClInclude Include="..\re.h" />
+    <ClInclude Include="..\files.h" />
   </ItemGroup>
 </Project>

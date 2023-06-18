@@ -396,3 +396,8 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+crt.h
+quick.h
+stb_image.h
+version.h

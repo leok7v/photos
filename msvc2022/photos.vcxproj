@@ -149,6 +149,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\crt.h" />
+    <ClInclude Include="..\files.h" />
     <ClInclude Include="..\quick.h" />
     <ClInclude Include="..\re.h" />
     <ClInclude Include="..\samples\version.h" />
@@ -170,6 +171,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\crt.c" />
+    <ClCompile Include="..\exif.c" />
+    <ClCompile Include="..\files.c" />
     <ClCompile Include="..\photos.c" />
     <ClCompile Include="..\quick.c" />
     <ClCompile Include="..\re.c" />
