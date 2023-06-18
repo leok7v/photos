@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="res">
+      <UniqueIdentifier>{c60b96ea-15fe-4796-86c9-3b9428dc82c7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\photos.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\photos.rc" />
+    <ResourceCompile Include="..\version.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\photos.c" />
+    <ClCompile Include="..\quick.c" />
+    <ClCompile Include="..\crt.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\samples\version.h" />
+    <ClInclude Include="..\crt.h" />
+    <ClInclude Include="..\quick.h" />
+  </ItemGroup>
+</Project>

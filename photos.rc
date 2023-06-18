@@ -1,0 +1,17 @@
+﻿//#ifdef RC_INVOKED
+//#ifndef _INC_WINDOWS
+//#define _INC_WINDOWS
+//#include "winres.h"
+//#endif
+//#endif
+
+101 ICON "photos.ico"
+
+#define company_name "Leo Kuznetsov"
+#define copyright "Copyright (C) 2023 Leo Kuznetsov. All rights reserved."
+#define file_description "Photos"
+#define original_file_name "photos.exe"
+#define product_name "photos"
+
+#include "..\version.rc"
+
