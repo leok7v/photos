@@ -1,0 +1,39 @@
+name: build-on-push
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: setup msbuild
+        uses: microsoft/setup-msbuild@v1.1
+      - name: build debug
+        run:  msbuild msvc2022\photos.sln -t:rebuild -verbosity:quiet -property:Configuration=Debug
+      - name: build release
+        run:  msbuild msvc2022\photos.sln -t:rebuild -verbosity:quiet -property:Configuration=Release
+      - name: short sha
+        id: vars
+        run: echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: check short sha
+        run: echo ${{ steps.vars.outputs.sha_short }}
+      - name: upload release artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: photos.release.zip
+          path: |
+            bin\Release\photos.exe
+          retention-days: 5
+      - name: upload debug artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: photos.debug.zip
+          path: |
+            bin\Debug\photos.exe
+          retention-days: 5
