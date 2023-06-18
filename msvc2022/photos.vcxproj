@@ -150,6 +150,7 @@
   <ItemGroup>
     <ClInclude Include="..\crt.h" />
     <ClInclude Include="..\quick.h" />
+    <ClInclude Include="..\re.h" />
     <ClInclude Include="..\samples\version.h" />
   </ItemGroup>
   <ItemGroup>
@@ -171,6 +172,7 @@
     <ClCompile Include="..\crt.c" />
     <ClCompile Include="..\photos.c" />
     <ClCompile Include="..\quick.c" />
+    <ClCompile Include="..\re.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

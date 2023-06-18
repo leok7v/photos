@@ -16,10 +16,12 @@
     <ClCompile Include="..\photos.c" />
     <ClCompile Include="..\quick.c" />
     <ClCompile Include="..\crt.c" />
+    <ClCompile Include="..\re.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\samples\version.h" />
     <ClInclude Include="..\crt.h" />
     <ClInclude Include="..\quick.h" />
+    <ClInclude Include="..\re.h" />
   </ItemGroup>
 </Project>
