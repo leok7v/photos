@@ -32,6 +32,7 @@
 */
 
 #include "TinyEXIF.h"
+#include "crt.h"
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
@@ -54,19 +55,19 @@ int strcasecmp(const char* a, const char* b) {
 
 #ifndef TINYEXIF_NO_XMP_SUPPORT
 // search string inside a string, case sensitive
-static const char* strrnstr(const char* haystack, const char* needle, size_t len) {
+static const char* strrnstr(const char* haystack, const char* needle, size_t bytes) {
     const size_t needle_len(strlen(needle));
     if (0 == needle_len)
         return haystack;
-    if (len <= needle_len)
-        return NULL;
-    for (size_t i=len-needle_len; i-- > 0; ) {
+    if (bytes <= needle_len)
+        return nullptr;
+    for (size_t i=bytes-needle_len; i-- > 0; ) {
         if (haystack[0] == needle[0] &&
             0 == strncmp(haystack, needle, needle_len))
             return haystack;
         haystack++;
     }
-    return NULL;
+    return nullptr;
 }
 
 // split an input string with a delimiter and fill a string vector
@@ -154,21 +155,23 @@ enum JPEG_MARKERS {
     JM_COM   = 0xFE
 };
 
-
 // Parser helper
 class EntryParser {
 private:
     const uint8_t* buf = nullptr;
-    const unsigned len = 0;
+    const unsigned bytes = 0;
     const unsigned tiff_header_start = 0;
     const bool alignIntel = false; // byte alignment (defined in EXIF header)
     unsigned offs = 0; // current offset into buffer
     uint16_t tag = 0, format = 0;
     uint32_t length = 0;
+    EXIFInfo &info;
 
 public:
-    EntryParser(const uint8_t* _buf, unsigned _len, unsigned _tiff_header_start, bool _alignIntel)
-        : buf(_buf), len(_len), tiff_header_start(_tiff_header_start), alignIntel(_alignIntel), offs(0) {}
+    EntryParser(EXIFInfo &_info, 
+        const uint8_t* _buf, unsigned _len, unsigned _tiff_header_start, bool _alignIntel)
+        : info(_info), buf(_buf), bytes(_len), tiff_header_start(_tiff_header_start), 
+          alignIntel(_alignIntel), offs(0) {}
 
     void Init(unsigned _offs) {
         offs = _offs - 12;
@@ -181,7 +184,7 @@ public:
         length = parse32(buf + offs + 4, alignIntel);
     }
 
-    const uint8_t* GetBuffer() const { return buf; }
+    const uint8_t* get() const { return buf; }
     unsigned GetOffset() const { return offs; }
     bool IsIntelAligned() const { return alignIntel; }
 
@@ -198,68 +201,73 @@ public:
     bool IsUndefined() const { return format == 7; }
 
     std::string FetchString() const {
-        return parseString(buf, length, GetData(), tiff_header_start, len, alignIntel);
+        return parseString(buf, length, GetData(), tiff_header_start, bytes, alignIntel);
     }
 
-    bool Fetch(std::string& val) const {
+    bool fetch_str(exif_str_t& val) const {
         if (format != 2 || length == 0)
             return false;
-        val = FetchString();
+        if (info.next == nullptr) { info.next = info.strings; }
+        std::string s = FetchString();
+        fatal_if( (size_t)(info.next - info.strings) <= (s.size() + 1));
+        memcpy(info.next, s.c_str(), s.size() + 1);
+        val = info.next;
+        info.next += s.size() + 1;
         return true;
     }
 
-    bool Fetch(uint8_t& val) const {
+    bool fetch8(uint8_t& val) const {
         if ((format != 1 && format != 2 && format != 6) || length == 0)
             return false;
         val = parse8(buf + offs + 8);
         return true;
     }
 
-    bool Fetch(uint16_t& val) const {
+    bool fetch16(uint16_t& val) const {
         if (!IsShort() || length == 0)
             return false;
         val = parse16(buf + offs + 8, alignIntel);
         return true;
     }
 
-    bool Fetch(uint16_t& val, uint32_t idx) const {
+    bool fetch16_idx(uint16_t& val, uint32_t idx) const {
         if (!IsShort() || length <= idx)
             return false;
         val = parse16(buf + GetSubIFD() + idx*2, alignIntel);
         return true;
     }
 
-    bool Fetch(uint32_t& val) const {
+    bool fetch32(uint32_t& val) const {
         if (!IsLong() || length == 0)
             return false;
         val = parse32(buf + offs + 8, alignIntel);
         return true;
     }
 
-    bool Fetch(float& val) const {
+    bool fetch_float(float& val) const {
         if (!IsFloat() || length == 0)
             return false;
         val = parseFloat(buf + offs + 8, alignIntel);
         return true;
     }
 
-    bool Fetch(double& val) const {
+    bool fetch_double(double& val) const {
         if (!IsRational() || length == 0)
             return false;
         val = parseRational(buf + GetSubIFD(), alignIntel, IsSRational());
         return true;
     }
 
-    bool Fetch(double& val, uint32_t idx) const {
+    bool fetch_double_idx(double& val, uint32_t idx) const {
         if (!IsRational() || length <= idx)
             return false;
         val = parseRational(buf + GetSubIFD() + idx*8, alignIntel, IsSRational());
         return true;
     }
 
-    bool FetchFloat(double& val) const {
+    bool fetch_float_as_doble(double& val) const {
         float _val;
-        if (!Fetch(_val))
+        if (!fetch_float(_val))
             return false;
         val = _val;
         return true;
@@ -312,7 +320,7 @@ public:
         unsigned num_components,
         unsigned data,
         unsigned base,
-        unsigned len,
+        unsigned bytes,
         bool intel)
     {
         std::string value;
@@ -325,7 +333,7 @@ public:
             if (value[num_components-1] == '\0')
                 value.resize(num_components-1);
         } else
-        if (base+data+num_components <= len) {
+        if (base+data+num_components <= bytes) {
             const char* const sz((const char*)buf+base+data);
             unsigned num(0);
             while (num < num_components && sz[num] != '\0')
@@ -338,15 +346,7 @@ public:
     }
 };
 
-// Constructors
-EXIFInfo::EXIFInfo() : Fields(FIELD_NA) {
-}
-
-EXIFInfo::EXIFInfo(EXIFStream& stream) {
-    parseFrom(stream);
-}
-
-EXIFInfo::EXIFInfo(std::istream& stream) {
+EXIFInfo::EXIFInfo(exif_stream_t* stream) {
     parseFrom(stream);
 }
 
@@ -359,64 +359,64 @@ void EXIFInfo::parseIFDImage(EntryParser& parser, unsigned& exif_sub_ifd_offset,
     switch (parser.GetTag()) {
         case 0x0102:
             // Bits per sample
-            parser.Fetch(BitsPerSample);
+            parser.fetch16(BitsPerSample);
             break;
         case 0x010e:
             // Image description
-            parser.Fetch(ImageDescription);
+            parser.fetch_str(ImageDescription);
             break;
         case 0x010f:
             // Camera maker
-            parser.Fetch(Make);
+            parser.fetch_str(Make);
             break;
         case 0x0110:
             // Camera model
-            parser.Fetch(Model);
+            parser.fetch_str(Model);
             break;
         case 0x0112:
             // Orientation of image
-            parser.Fetch(Orientation);
+            parser.fetch16(Orientation);
             break;
 
         case 0x011a:
             // XResolution 
-            parser.Fetch(XResolution);
+            parser.fetch_double(XResolution);
             break;
         case 0x011b:
             // YResolution 
-            parser.Fetch(YResolution);
+            parser.fetch_double(YResolution);
             break;
         case 0x0128:
             // Resolution Unit
-            parser.Fetch(ResolutionUnit);
+            parser.fetch16(ResolutionUnit);
             break;
         case 0x0131:
             // Software used for image
-            parser.Fetch(Software);
+            parser.fetch_str(Software);
             break;
         case 0x0132:
             // EXIF/TIFF date/time of image modification
-            parser.Fetch(DateTime);
+            parser.fetch_str(DateTime);
             break;
         case 0x1001:
             // Original Image width
-            if (!parser.Fetch(RelatedImageWidth)) {
+            if (!parser.fetch32(RelatedImageWidth)) {
                 uint16_t _RelatedImageWidth;
-                if (parser.Fetch(_RelatedImageWidth))
+                if (parser.fetch16(_RelatedImageWidth))
                     RelatedImageWidth = _RelatedImageWidth;
             }
             break;
         case 0x1002:
             // Original Image height
-            if (!parser.Fetch(RelatedImageHeight)) {
+            if (!parser.fetch32(RelatedImageHeight)) {
                 uint16_t _RelatedImageHeight;
-                if (parser.Fetch(_RelatedImageHeight))
+                if (parser.fetch16(_RelatedImageHeight))
                     RelatedImageHeight = _RelatedImageHeight;
             }
             break;
         case 0x8298:
             // Copyright information
-            parser.Fetch(Copyright);
+            parser.fetch_str(Copyright);
             break;
         case 0x8769:
             // EXIF SubIFD offset
@@ -447,72 +447,72 @@ void EXIFInfo::parseIFDExif(EntryParser& parser) {
             break;
         case 0x829a:
             // Exposure time in seconds
-            parser.Fetch(ExposureTime);
+            parser.fetch_double(ExposureTime);
             break;
         case 0x829d:
             // FNumber
-            parser.Fetch(FNumber);
+            parser.fetch_double(FNumber);
             break;
         case 0x8822:
             // Exposure Program
-            parser.Fetch(ExposureProgram);
+            parser.fetch16(ExposureProgram);
             break;
         case 0x8827:
             // ISO Speed Rating
-            parser.Fetch(ISOSpeedRatings);
+            parser.fetch16(ISOSpeedRatings);
             break;
         case 0x9003:
             // Original date and time
-            parser.Fetch(DateTimeOriginal);
+            parser.fetch_str(DateTimeOriginal);
             break;
         case 0x9004:
             // Digitization date and time
-            parser.Fetch(DateTimeDigitized);
+            parser.fetch_str(DateTimeDigitized);
             break;
         case 0x9201:
             // Shutter speed value
-            parser.Fetch(ShutterSpeedValue);
+            parser.fetch_double(ShutterSpeedValue);
             ShutterSpeedValue = 1.0/exp(ShutterSpeedValue*log(2));
             break;
         case 0x9202:
             // Aperture value
-            parser.Fetch(ApertureValue);
+            parser.fetch_double(ApertureValue);
             ApertureValue = exp(ApertureValue*log(2)*0.5);
             break;
         case 0x9203:
             // Brightness value
-            parser.Fetch(BrightnessValue);
+            parser.fetch_double(BrightnessValue);
             break;
         case 0x9204:
             // Exposure bias value 
-            parser.Fetch(ExposureBiasValue);
+            parser.fetch_double(ExposureBiasValue);
             break;
         case 0x9206:
             // Subject distance
-            parser.Fetch(SubjectDistance);
+            parser.fetch_double(SubjectDistance);
             break;
         case 0x9207:
             // Metering mode
-            parser.Fetch(MeteringMode);
+            parser.fetch16(MeteringMode);
             break;
         case 0x9208:
             // Light source
-            parser.Fetch(LightSource);
+            parser.fetch16(LightSource);
             break;
         case 0x9209:
             // Flash info
-            parser.Fetch(Flash);
+            parser.fetch16(Flash);
             break;
         case 0x920a:
             // Focal length
-            parser.Fetch(FocalLength);
+            parser.fetch_double(FocalLength);
             break;
         case 0x9214:
             // Subject area
             if (parser.IsShort() && parser.GetLength() > 1) {
                 SubjectArea.resize(parser.GetLength());
                 for (uint32_t i=0; i<parser.GetLength(); ++i)
-                    parser.Fetch(SubjectArea[i], i);
+                    parser.fetch16_idx(SubjectArea[i], i);
             }
             break;
         case 0x927c:
@@ -521,74 +521,74 @@ void EXIFInfo::parseIFDExif(EntryParser& parser) {
             break;
         case 0x9291:
             // Fractions of seconds for DateTimeOriginal
-            parser.Fetch(SubSecTimeOriginal);
+            parser.fetch_str(SubSecTimeOriginal);
             break;
         case 0xa002:
             // EXIF Image width
-            if (!parser.Fetch(ImageWidth)) {
+            if (!parser.fetch32(ImageWidth)) {
                 uint16_t _ImageWidth;
-                if (parser.Fetch(_ImageWidth))
+                if (parser.fetch16(_ImageWidth))
                     ImageWidth = _ImageWidth;
             }
             break;
         case 0xa003:
             // EXIF Image height
-            if (!parser.Fetch(ImageHeight)) {
+            if (!parser.fetch32(ImageHeight)) {
                 uint16_t _ImageHeight;
-                if (parser.Fetch(_ImageHeight))
+                if (parser.fetch16(_ImageHeight))
                     ImageHeight = _ImageHeight;
             }
             break;
         case 0xa20e:
             // Focal plane X resolution
-            parser.Fetch(LensInfo.FocalPlaneXResolution);
+            parser.fetch_double(LensInfo.FocalPlaneXResolution);
             break;
         case 0xa20f:
             // Focal plane Y resolution
-            parser.Fetch(LensInfo.FocalPlaneYResolution);
+            parser.fetch_double(LensInfo.FocalPlaneYResolution);
             break;
         case 0xa210:
             // Focal plane resolution unit
-            parser.Fetch(LensInfo.FocalPlaneResolutionUnit);
+            parser.fetch16(LensInfo.FocalPlaneResolutionUnit);
             break;
         case 0xa215:
             // Exposure Index and ISO Speed Rating are often used interchangeably
             if (ISOSpeedRatings == 0) {
                 double ExposureIndex;
-                if (parser.Fetch(ExposureIndex))
+                if (parser.fetch_double(ExposureIndex))
                     ISOSpeedRatings = (uint16_t)ExposureIndex;
             }
             break;
         case 0xa404:
             // Digital Zoom Ratio
-            parser.Fetch(LensInfo.DigitalZoomRatio);
+            parser.fetch_double(LensInfo.DigitalZoomRatio);
             break;
         case 0xa405:
             // Focal length in 35mm film
-            if (!parser.Fetch(LensInfo.FocalLengthIn35mm)) {
+            if (!parser.fetch_double(LensInfo.FocalLengthIn35mm)) {
                 uint16_t _FocalLengthIn35mm;
-                if (parser.Fetch(_FocalLengthIn35mm))
+                if (parser.fetch16(_FocalLengthIn35mm))
                     LensInfo.FocalLengthIn35mm = (double)_FocalLengthIn35mm;
             }
             break;
         case 0xa431:
             // Serial number of the camera
-            parser.Fetch(SerialNumber);
+            parser.fetch_str(SerialNumber);
             break;
         case 0xa432:
             // Focal length and FStop.
-            if (parser.Fetch(LensInfo.FocalLengthMin, 0))
-                if (parser.Fetch(LensInfo.FocalLengthMax, 1))
-                    if (parser.Fetch(LensInfo.FStopMin, 2))
-                        parser.Fetch(LensInfo.FStopMax, 3);
+            if (parser.fetch_double_idx(LensInfo.FocalLengthMin, 0))
+                if (parser.fetch_double_idx(LensInfo.FocalLengthMax, 1))
+                    if (parser.fetch_double_idx(LensInfo.FStopMin, 2))
+                        parser.fetch_double_idx(LensInfo.FStopMax, 3);
             break;
         case 0xa433:
             // Lens make.
-            parser.Fetch(LensInfo.Make);
+            parser.fetch_str(LensInfo.Make);
             break;
         case 0xa434:
             // Lens model.
-            parser.Fetch(LensInfo.Model);
+            parser.fetch_str(LensInfo.Model);
             break;
     }
 }
@@ -597,43 +597,43 @@ void EXIFInfo::parseIFDExif(EntryParser& parser) {
 void EXIFInfo::parseIFDMakerNote(EntryParser& parser) {
     const unsigned startOff = parser.GetOffset();
     const uint32_t off = parser.GetSubIFD();
-    if (0 != strcasecmp(Make.c_str(), "DJI"))
+    if (0 != strcasecmp(Make, "DJI"))
         return;
-    int num_entries = EntryParser::parse16(parser.GetBuffer()+off, parser.IsIntelAligned());
+    int num_entries = EntryParser::parse16(parser.get()+off, parser.IsIntelAligned());
     if (uint32_t(2 + 12 * num_entries) > parser.GetLength())
         return;
     parser.Init(off+2);
     parser.ParseTag();
     --num_entries;
-    std::string maker;
-    if (parser.GetTag() == 1 && parser.Fetch(maker)) {
-        if (0 == strcasecmp(maker.c_str(), "DJI")) {
+    exif_str_t maker = nullptr;
+    if (parser.GetTag() == 1 && parser.fetch_str(maker)) {
+        if (0 == strcasecmp(maker, "DJI")) {
             while (--num_entries >= 0) {
                 parser.ParseTag();
                 switch (parser.GetTag()) {
                     case 3:
                         // SpeedX
-                        parser.FetchFloat(GeoLocation.SpeedX);
+                        parser.fetch_float_as_doble(GeoLocation.SpeedX);
                         break;
                     case 4:
                         // SpeedY
-                        parser.FetchFloat(GeoLocation.SpeedY);
+                        parser.fetch_float_as_doble(GeoLocation.SpeedY);
                         break;
                     case 5:
                         // SpeedZ
-                        parser.FetchFloat(GeoLocation.SpeedZ);
+                        parser.fetch_float_as_doble(GeoLocation.SpeedZ);
                         break;
                     case 9:
                         // Camera Pitch
-                        parser.FetchFloat(GeoLocation.PitchDegree);
+                        parser.fetch_float_as_doble(GeoLocation.PitchDegree);
                         break;
                     case 10:
                         // Camera Yaw
-                        parser.FetchFloat(GeoLocation.YawDegree);
+                        parser.fetch_float_as_doble(GeoLocation.YawDegree);
                         break;
                     case 11:
                         // Camera Roll
-                        parser.FetchFloat(GeoLocation.RollDegree);
+                        parser.fetch_float_as_doble(GeoLocation.RollDegree);
                         break;
                 }
             }
@@ -647,43 +647,43 @@ void EXIFInfo::parseIFDGPS(EntryParser& parser) {
     switch (parser.GetTag()) {
         case 1:
             // GPS north or south
-            parser.Fetch(GeoLocation.LatComponents.direction);
+            parser.fetch8(GeoLocation.LatComponents.direction);
             break;
         case 2:
             // GPS latitude
             if (parser.IsRational() && parser.GetLength() == 3) {
-                parser.Fetch(GeoLocation.LatComponents.degrees, 0);
-                parser.Fetch(GeoLocation.LatComponents.minutes, 1);
-                parser.Fetch(GeoLocation.LatComponents.seconds, 2);
+                parser.fetch_double_idx(GeoLocation.LatComponents.degrees, 0);
+                parser.fetch_double_idx(GeoLocation.LatComponents.minutes, 1);
+                parser.fetch_double_idx(GeoLocation.LatComponents.seconds, 2);
             }
             break;
         case 3:
             // GPS east or west
-            parser.Fetch(GeoLocation.LonComponents.direction);
+            parser.fetch8(GeoLocation.LonComponents.direction);
             break;
         case 4:
             // GPS longitude
             if (parser.IsRational() && parser.GetLength() == 3) {
-                parser.Fetch(GeoLocation.LonComponents.degrees, 0);
-                parser.Fetch(GeoLocation.LonComponents.minutes, 1);
-                parser.Fetch(GeoLocation.LonComponents.seconds, 2);
+                parser.fetch_double_idx(GeoLocation.LonComponents.degrees, 0);
+                parser.fetch_double_idx(GeoLocation.LonComponents.minutes, 1);
+                parser.fetch_double_idx(GeoLocation.LonComponents.seconds, 2);
             }
             break;
         case 5:
             // GPS altitude reference (below or above sea level)
-            parser.Fetch((uint8_t&)GeoLocation.AltitudeRef);
+            parser.fetch8((uint8_t&)GeoLocation.AltitudeRef);
             break;
         case 6:
             // GPS altitude
-            parser.Fetch(GeoLocation.Altitude);
+            parser.fetch_double(GeoLocation.Altitude);
             break;
         case 7:
             // GPS timestamp
             if (parser.IsRational() && parser.GetLength() == 3) {
-                double h,m,s;
-                parser.Fetch(h, 0);
-                parser.Fetch(m, 1);
-                parser.Fetch(s, 2);
+                double h = 0, m = 0, s = 0;
+                parser.fetch_double_idx(h, 0);
+                parser.fetch_double_idx(m, 1);
+                parser.fetch_double_idx(s, 2);
                 char buffer[256];
                 snprintf(buffer, 256, "%g %g %g", h, m, s);
                 GeoLocation.GPSTimeStamp = buffer;
@@ -691,19 +691,19 @@ void EXIFInfo::parseIFDGPS(EntryParser& parser) {
             break;
         case 11:
             // Indicates the GPS DOP (data degree of precision)
-            parser.Fetch(GeoLocation.GPSDOP);
+            parser.fetch_double(GeoLocation.GPSDOP);
             break;
         case 18:
             // GPS geodetic survey data
-            parser.Fetch(GeoLocation.GPSMapDatum);
+            parser.fetch_str(GeoLocation.GPSMapDatum);
             break;
         case 29:
             // GPS date-stamp
-            parser.Fetch(GeoLocation.GPSDateStamp);
+            parser.fetch_str(GeoLocation.GPSDateStamp);
             break;
         case 30:
             // GPS differential indicates whether differential correction is applied to the GPS receiver
-            parser.Fetch(GeoLocation.GPSDifferential);
+            parser.fetch16(GeoLocation.GPSDifferential);
             break;
     }
 }
@@ -711,14 +711,12 @@ void EXIFInfo::parseIFDGPS(EntryParser& parser) {
 // Locates the JM_APP1 segment and parses it using
 // parseFromEXIFSegment() or parseFromXMPSegment()
 
-int EXIFInfo::parseFrom(EXIFStream& stream) {
+int EXIFInfo::parseFrom(exif_stream_t* stream) {
     clear();
-    if (!stream.IsValid())
-        return PARSE_INVALID_JPEG;
     // Sanity check: all JPEG files start with 0xFFD8 and end with 0xFFD9
-    // This check also ensures that the user has supplied a correct value for len.
-    const uint8_t* buf(stream.GetBuffer(2));
-    if (buf == NULL || buf[0] != JM_START || buf[1] != JM_SOI)
+    // This check also ensures that the user has supplied a correct value for bytes.
+    const uint8_t* buf(stream->get(stream, 2));
+    if (buf == nullptr || buf[0] != JM_START || buf[1] != JM_SOI)
         return PARSE_INVALID_JPEG;
     // Scan for JM_APP1 header (bytes 0xFF 0xE1) and parse its length.
     // Exit if both EXIF and XMP sections were parsed.
@@ -729,14 +727,14 @@ int EXIFInfo::parseFrom(EXIFStream& stream) {
         inline operator uint32_t& () { return val; }
         inline int operator () (int code=PARSE_ABSENT_DATA) const { return val&FIELD_ALL ? (int)PARSE_SUCCESS : code; }
     } app1s(Fields);
-    while ((buf=stream.GetBuffer(2)) != NULL) {
+    while ((buf = stream->get(stream, 2)) != nullptr) {
         // find next marker;
         // in cases of markers appended after the compressed data,
         // optional JM_START fill bytes may precede the marker
         if (*buf++ != JM_START)
             break;
         uint8_t marker;
-        while ((marker=buf[0]) == JM_START && (buf=stream.GetBuffer(1)) != NULL);
+        while ((marker=buf[0]) == JM_START && (buf = stream->get(stream, 1)) != nullptr);
         // select marker
         uint16_t sectionLength;
         switch (marker) {
@@ -757,10 +755,10 @@ int EXIFInfo::parseFrom(EXIFStream& stream) {
             case JM_EOI: // no data? not good
                 return app1s();
             case JM_APP1:
-                if ((buf=stream.GetBuffer(2)) == NULL)
+                if ((buf=stream->get(stream, 2)) == nullptr)
                     return app1s(PARSE_INVALID_JPEG);
                 sectionLength = EntryParser::parse16(buf, false);
-                if (sectionLength <= 2 || (buf=stream.GetBuffer(sectionLength-=2)) == NULL)
+                if (sectionLength <= 2 || (buf=stream->get(stream, sectionLength-=2)) == nullptr)
                     return app1s(PARSE_INVALID_JPEG);
                 switch (int ret=parseFromEXIFSegment(buf, sectionLength)) {
                     case PARSE_ABSENT_DATA:
@@ -787,74 +785,42 @@ int EXIFInfo::parseFrom(EXIFStream& stream) {
                 break;
             default:
                 // skip the section
-                if ((buf=stream.GetBuffer(2)) == NULL ||
+                if ((buf=stream->get(stream, 2)) == nullptr ||
                     (sectionLength=EntryParser::parse16(buf, false)) <= 2 ||
-                    !stream.SkipBuffer(sectionLength-2))
+                    !stream->skip(stream, sectionLength-2))
                     return app1s(PARSE_INVALID_JPEG);
         }
     }
     return app1s();
 }
 
-int EXIFInfo::parseFrom(std::istream& stream) {
-    class EXIFStdStream : public EXIFStream {
-    public:
-        EXIFStdStream(std::istream& stream)
-            : stream(stream) {
-            // Would be nice to assert here that the stream was opened in binary mode, but
-            // apparently that's not possible: https://stackoverflow.com/a/224259/19254
-        }
 
-        bool IsValid() const override {
-            return !!stream;
-        }
+typedef struct exif_stream_buffer_s {
+    exif_stream_t stream;
+    const uint8_t* it;
+    const uint8_t* end;
+} exif_stream_buffer_t;
 
-        const uint8_t* GetBuffer(unsigned desiredLength) override {
-            buffer.resize(desiredLength);
-            if (!stream.read(reinterpret_cast<char*>(buffer.data()), desiredLength))
-                return NULL;
-            return buffer.data();
-        }
-
-        bool SkipBuffer(unsigned desiredLength) override {
-            return (bool)stream.seekg(desiredLength, std::ios::cur);
-        }
-    private:
-        std::istream& stream;
-        std::vector<uint8_t> buffer;
-    };
-    EXIFStdStream streamWrapper(stream);
-    return parseFrom(streamWrapper);
+static const uint8_t* get(exif_stream_t* stream, uint32_t bytes) {
+    exif_stream_buffer_t* sb = (exif_stream_buffer_t*)stream;
+    const uint8_t* next = sb->it + bytes;
+    if (next > sb->end) return nullptr;
+    const uint8_t* begin = sb->it;
+    sb->it = next;
+    return begin;
 }
 
-int EXIFInfo::parseFrom(const uint8_t* buf, unsigned len) {
-    class EXIFStreamBuffer : public EXIFStream {
-    public:
-        explicit EXIFStreamBuffer(const uint8_t* buf, unsigned len)
-            : it(buf), end(buf+len) {}
+static bool skip(exif_stream_t* stream, uint32_t bytes) {
+    return stream->get(stream, bytes) != nullptr;
+}
 
-        bool IsValid() const override {
-            return it != NULL;
-        }
-
-        const uint8_t* GetBuffer(unsigned desiredLength) override {
-            const uint8_t* const itNext(it+desiredLength);
-            if (itNext >= end)
-                return NULL;
-            const uint8_t* const begin(it);
-            it = itNext;
-            return begin;
-        }
-        bool SkipBuffer(unsigned desiredLength) override {
-            return GetBuffer(desiredLength) != NULL;
-        }
-
-    private:
-        const uint8_t* it, * const end;
-    };
-
-    EXIFStreamBuffer stream(buf, len);
-    return parseFrom(stream);
+int EXIFInfo::parseFrom(const uint8_t* buf, uint32_t bytes) {
+    exif_stream_buffer_t exif_stream_buffer = {0};
+    exif_stream_buffer.it = buf;
+    exif_stream_buffer.end = buf + bytes;
+    exif_stream_buffer.stream.get = get;
+    exif_stream_buffer.stream.skip = skip;
+    return parseFrom(&exif_stream_buffer.stream);
 }
 
 // Main parsing function for an EXIF segment.
@@ -868,14 +834,14 @@ int EXIFInfo::parseFrom(const uint8_t* buf, unsigned len) {
 // =========
 //  14 bytes
 //
-// PARAM: 'buf' start of the EXIF TIFF, which must be the bytes "Exif\0\0".
-// PARAM: 'len' length of buffer
+// PARAM: 'data' start of the EXIF TIFF, which must be the bytes "Exif\0\0".
+// PARAM: 'bytes' bytes of buffer
 
-int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
+int EXIFInfo::parseFromEXIFSegment(const uint8_t* data, unsigned bytes) {
     unsigned offs = 6; // current offset into buffer
-    if (!buf || len < offs)
+    if (data == null || bytes < offs)
         return PARSE_ABSENT_DATA;
-    if (!std::equal(buf, buf+offs, "Exif\0\0"))
+    if (!std::equal(data, data + offs, "Exif\0\0"))
         return PARSE_ABSENT_DATA;
     // Now parsing the TIFF header. The first two bytes are either "II" or
     // "MM" for Intel or Motorola byte alignment. Sanity check by parsing
@@ -888,24 +854,24 @@ int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
     //  4 bytes: offset to first IDF
     // -----------------------------
     //  8 bytes
-    if (offs + 8 > len)
+    if (offs + 8 > bytes)
         return PARSE_CORRUPT_DATA;
     bool alignIntel;
-    if (buf[offs] == 'I' && buf[offs+1] == 'I')
+    if (data[offs] == 'I' && data[offs+1] == 'I')
         alignIntel = true; // 1: Intel byte alignment
     else
-    if (buf[offs] == 'M' && buf[offs+1] == 'M')
+    if (data[offs] == 'M' && data[offs+1] == 'M')
         alignIntel = false; // 0: Motorola byte alignment
     else
         return PARSE_UNKNOWN_BYTEALIGN;
-    EntryParser parser(buf, len, offs, alignIntel);
+    EntryParser parser(*this, data, bytes, offs, alignIntel);
     offs += 2;
-    if (0x2a != EntryParser::parse16(buf + offs, alignIntel))
+    if (0x2a != EntryParser::parse16(data + offs, alignIntel))
         return PARSE_CORRUPT_DATA;
     offs += 2;
-    const unsigned first_ifd_offset = EntryParser::parse32(buf + offs, alignIntel);
+    const unsigned first_ifd_offset = EntryParser::parse32(data + offs, alignIntel);
     offs += first_ifd_offset - 4;
-    if (offs >= len)
+    if (offs >= bytes)
         return PARSE_CORRUPT_DATA;
     // Now parsing the first Image File Directory (IFD0, for the main image).
     // An IFD consists of a variable number of 12-byte directory entries. The
@@ -913,13 +879,13 @@ int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
     // entries in the section. The last 4 bytes of the IFD contain an offset
     // to the next IFD, which means this IFD must contain exactly 6 + 12 * num
     // bytes of data.
-    if (offs + 2 > len)
+    if (offs + 2 > bytes)
         return PARSE_CORRUPT_DATA;
-    int num_entries = EntryParser::parse16(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_entries > len)
+    int num_entries = EntryParser::parse16(data + offs, alignIntel);
+    if (offs + 6 + 12 * num_entries > bytes)
         return PARSE_CORRUPT_DATA;
-    unsigned exif_sub_ifd_offset = len;
-    unsigned gps_sub_ifd_offset  = len;
+    unsigned exif_sub_ifd_offset = bytes;
+    unsigned gps_sub_ifd_offset  = bytes;
     parser.Init(offs+2);
     while (--num_entries >= 0) {
         parser.ParseTag();
@@ -929,10 +895,10 @@ int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
     // there. Note that it's possible that the EXIF SubIFD doesn't exist.
     // The EXIF SubIFD contains most of the interesting information that a
     // typical user might want.
-    if (exif_sub_ifd_offset + 4 <= len) {
+    if (exif_sub_ifd_offset + 4 <= bytes) {
         offs = exif_sub_ifd_offset;
-        num_entries = EntryParser::parse16(buf + offs, alignIntel);
-        if (offs + 6 + 12 * num_entries > len)
+        num_entries = EntryParser::parse16(data + offs, alignIntel);
+        if (offs + 6 + 12 * num_entries > bytes)
             return PARSE_CORRUPT_DATA;
         parser.Init(offs+2);
         while (--num_entries >= 0) {
@@ -942,10 +908,10 @@ int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
     }
     // Jump to the GPS SubIFD if it exists and parse all the information
     // there. Note that it's possible that the GPS SubIFD doesn't exist.
-    if (gps_sub_ifd_offset + 4 <= len) {
+    if (gps_sub_ifd_offset + 4 <= bytes) {
         offs = gps_sub_ifd_offset;
-        num_entries = EntryParser::parse16(buf + offs, alignIntel);
-        if (offs + 6 + 12 * num_entries > len)
+        num_entries = EntryParser::parse16(data + offs, alignIntel);
+        if (offs + 6 + 12 * num_entries > bytes)
             return PARSE_CORRUPT_DATA;
         parser.Init(offs+2);
         while (--num_entries >= 0) {
@@ -965,32 +931,32 @@ int EXIFInfo::parseFromEXIFSegment(const uint8_t* buf, unsigned len) {
 //  29 bytes: "http://ns.adobe.com/xap/1.0/\0" string
 //
 // PARAM: 'buf' start of the XMP header, which must be the bytes "http://ns.adobe.com/xap/1.0/\0".
-// PARAM: 'len' length of buffer
+// PARAM: 'bytes' length of buffer
 //
-int EXIFInfo::parseFromXMPSegment(const uint8_t* buf, unsigned len) {
+int EXIFInfo::parseFromXMPSegment(const uint8_t* buf, unsigned bytes) {
     unsigned offs = 29; // current offset into buffer
-    if (!buf || len < offs)
+    if (!buf || bytes < offs)
         return PARSE_ABSENT_DATA;
     if (!std::equal(buf, buf+offs, "http://ns.adobe.com/xap/1.0/\0"))
         return PARSE_ABSENT_DATA;
-    if (offs >= len)
+    if (offs >= bytes)
         return PARSE_CORRUPT_DATA;
-    return parseFromXMPSegmentXML((const char*)(buf + offs), len - offs);
+    return parseFromXMPSegmentXML((const char*)(buf + offs), bytes - offs);
 }
 
-int EXIFInfo::parseFromXMPSegmentXML(const char* szXML, unsigned len) {
+int EXIFInfo::parseFromXMPSegmentXML(const char* szXML, unsigned bytes) {
     // Skip xpacket end section so that tinyxml2 lib parses the section correctly.
-    const char* szEnd(Tools::strrnstr(szXML, "<?xpacket end=", len));
-    if (szEnd != NULL)
-        len = (unsigned)(szEnd - szXML);
+    const char* szEnd(Tools::strrnstr(szXML, "<?xpacket end=", bytes));
+    if (szEnd != nullptr)
+        bytes = (unsigned)(szEnd - szXML);
 
     // Try parsing the XML packet.
     tinyxml2::XMLDocument doc;
     const tinyxml2::XMLElement* document;
-    if (doc.Parse(szXML, len) != tinyxml2::XML_SUCCESS ||
-        ((document=doc.FirstChildElement("x:xmpmeta")) == NULL && (document=doc.FirstChildElement("xmp:xmpmeta")) == NULL) ||
-        (document=document->FirstChildElement("rdf:RDF")) == NULL ||
-        (document=document->FirstChildElement("rdf:Description")) == NULL)
+    if (doc.Parse(szXML, bytes) != tinyxml2::XML_SUCCESS ||
+        ((document=doc.FirstChildElement("x:xmpmeta")) == nullptr && (document=doc.FirstChildElement("xmp:xmpmeta")) == nullptr) ||
+        (document=document->FirstChildElement("rdf:RDF")) == nullptr ||
+        (document=document->FirstChildElement("rdf:Description")) == nullptr)
         return PARSE_ABSENT_DATA;
 
     // Try parsing the XMP content for tiff details.
@@ -1015,9 +981,9 @@ int EXIFInfo::parseFromXMPSegmentXML(const char* szXML, unsigned len) {
     // Try parsing the XMP content for projection type.
     {
     const tinyxml2::XMLElement* const element(document->FirstChildElement("GPano:ProjectionType"));
-    if (element != NULL) {
+    if (element != nullptr) {
         const char* const szProjectionType(element->GetText());
-        if (szProjectionType != NULL) {
+        if (szProjectionType != nullptr) {
             if (0 == strcasecmp(szProjectionType, "perspective"))
                 ProjectionType = 1;
             else
@@ -1034,33 +1000,33 @@ int EXIFInfo::parseFromXMPSegmentXML(const char* szXML, unsigned len) {
         // and parse if needed rational numbers stored as string fraction
         static bool Value(const tinyxml2::XMLElement* document, const char* name, double& value) {
             const char* szAttribute = document->Attribute(name);
-            if (szAttribute == NULL) {
+            if (szAttribute == nullptr) {
                 const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
-                if (element == NULL || (szAttribute=element->GetText()) == NULL)
+                if (element == nullptr || (szAttribute=element->GetText()) == nullptr)
                     return false;
             }
             std::vector<std::string> values;
             Tools::strSplit(szAttribute, '/', values);
             switch (values.size()) {
-            case 1: value = strtod(values.front().c_str(), NULL); return true;
-            case 2: value = strtod(values.front().c_str(), NULL)/strtod(values.back().c_str(), NULL); return true;
+            case 1: value = strtod(values.front().c_str(), nullptr); return true;
+            case 2: value = strtod(values.front().c_str(), nullptr)/strtod(values.back().c_str(), nullptr); return true;
             }
             return false;
         }
         // same as previous function but with unsigned int results
         static bool Value(const tinyxml2::XMLElement* document, const char* name, uint32_t& value) {
             const char* szAttribute = document->Attribute(name);
-            if (szAttribute == NULL) {
+            if (szAttribute == nullptr) {
                 const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
-                if (element == NULL || (szAttribute = element->GetText()) == NULL)
+                if (element == nullptr || (szAttribute = element->GetText()) == nullptr)
                     return false;
             }
-            value = strtoul(szAttribute, NULL, 0); return true;
+            value = strtoul(szAttribute, nullptr, 0); return true;
             return false;
         }
     };
     const char* szAbout(document->Attribute("rdf:about"));
-    if (0 == strcasecmp(Make.c_str(), "DJI") || (szAbout != NULL && 0 == strcasecmp(szAbout, "DJI Meta Data"))) {
+    if (0 == strcasecmp(Make.c_str(), "DJI") || (szAbout != nullptr && 0 == strcasecmp(szAbout, "DJI Meta Data"))) {
         ParseXMP::Value(document, "drone-dji:AbsoluteAltitude", GeoLocation.Altitude);
         ParseXMP::Value(document, "drone-dji:RelativeAltitude", GeoLocation.RelativeAltitude);
         ParseXMP::Value(document, "drone-dji:GimbalRollDegree", GeoLocation.RollDegree);

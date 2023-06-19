@@ -60,46 +60,37 @@ enum FieldCode {
 
 class EntryParser;
 
-//
 // Interface class responsible for fetching stream data to be parsed
-//
-class EXIFStream {
-public:
-    virtual ~EXIFStream() {}
 
-    // Check the state of the stream.
-    virtual bool IsValid() const = 0;
+typedef struct EXIFStream exif_stream_t;
 
+typedef struct EXIFStream {
     // Return the pointer to the beginning of the desired size buffer
     // following current buffer position.
-    virtual const uint8_t* GetBuffer(unsigned desiredLength) = 0;
-
+    const uint8_t* (*get)(exif_stream_t* stream, uint32_t bytes);
     // Advance current buffer position with the desired size;
     // return false if stream ends in less than the desired size.
-    virtual bool SkipBuffer(unsigned desiredLength) = 0;
-};
+    bool (*skip)(exif_stream_t* stream, uint32_t bytes);
+} exif_stream_t;
 
-//
+typedef const char* exif_str_t;
+
 // Class responsible for storing and parsing EXIF & XMP metadata from a JPEG stream
-//
-class EXIFInfo {
 
-public:
-    EXIFInfo();
-    EXIFInfo(EXIFStream& stream);
-    EXIFInfo(std::istream& stream); // NB: the stream must have been opened in binary mode
+struct EXIFInfo {
+
+    EXIFInfo(exif_stream_t* stream);
     EXIFInfo(const uint8_t* data, unsigned length);
 
     // Parsing function for an entire JPEG image stream.
     //
     // PARAM 'stream': Interface to fetch JPEG image stream.
     // PARAM 'data': A pointer to a JPEG image.
-    // PARAM 'length': The length of the JPEG image.
+    // PARAM 'bytes': The bytes in the JPEG image.
     // RETURN:  PARSE_SUCCESS (0) on success with 'result' filled out
     //          error code otherwise, as defined by the PARSE_* macros
-    int parseFrom(EXIFStream& stream);
-    int parseFrom(std::istream& stream); // NB: the stream must have been opened in binary mode
-    int parseFrom(const uint8_t* data, unsigned length);
+    int parseFrom(exif_stream_t* stream);
+    int parseFrom(const uint8_t* data, unsigned bytes);
 
     // Parsing function for an EXIF segment. This is used internally by parseFrom()
     // but can be called for special cases where only the EXIF section is 
@@ -118,7 +109,6 @@ public:
     // Should be called before parsing a new stream.
     void clear();
 
-private:
     // Parse tag as Image IFD.
     void parseIFDImage(EntryParser&, unsigned&, unsigned&);
     // Parse tag as Exif IFD.
@@ -127,18 +117,19 @@ private:
     void parseIFDGPS(EntryParser&);
     // Parse tag as MakerNote IFD.
     void parseIFDMakerNote(EntryParser&);
+    char strings[64 * 1024]; // EXIF UTF-8 string storage
+    char* next = nullptr;    // next unused EXIF UTF-8 string storage
 
-public:
     // Data fields
-    uint32_t Fields = 0;                // Store if EXIF and/or XMP data fields are available
+    uint32_t Fields = FIELD_NA;         // Store if EXIF and/or XMP data fields are available
     uint32_t ImageWidth = 0;            // Image width reported in EXIF data
     uint32_t ImageHeight = 0;           // Image height reported in EXIF data
     uint32_t RelatedImageWidth = 0;     // Original image width reported in EXIF data
     uint32_t RelatedImageHeight = 0;    // Original image height reported in EXIF data
-    std::string ImageDescription;       // Image description
-    std::string Make;                   // Camera manufacturer's name
-    std::string Model;                  // Camera model
-    std::string SerialNumber;           // Serial number of the body of the camera
+    exif_str_t ImageDescription;        // Image description
+    exif_str_t Make;                    // Camera manufacturer's name
+    exif_str_t Model;                   // Camera model
+    exif_str_t SerialNumber;            // Serial number of the body of the camera
     uint16_t Orientation = 0;           // Image orientation, start of data corresponds to
                                         // 0: unspecified in EXIF data
                                         // 1: upper left of image
@@ -153,12 +144,12 @@ public:
                                         // 2: inch
                                         // 3: centimeter
     uint16_t BitsPerSample = 0;         // Number of bits per component
-    std::string Software;               // Software used
-    std::string DateTime;               // File change date and time
-    std::string DateTimeOriginal;       // Original file date and time (may not exist)
-    std::string DateTimeDigitized;      // Digitization date and time (may not exist)
-    std::string SubSecTimeOriginal;     // Sub-second time that original picture was taken
-    std::string Copyright;              // File copyright information
+    exif_str_t Software;                // Software used
+    exif_str_t DateTime;                // File change date and time
+    exif_str_t DateTimeOriginal;        // Original file date and time (may not exist)
+    exif_str_t DateTimeDigitized;       // Digitization date and time (may not exist)
+    exif_str_t SubSecTimeOriginal;      // Sub-second time that original picture was taken
+    exif_str_t Copyright;               // File copyright information
     double ExposureTime = 0;            // Exposure time in seconds
     double FNumber = 0;                 // F/stop
     uint16_t ExposureProgram = 0;       // Exposure program
@@ -233,11 +224,13 @@ public:
                                         // 2: location of the main subject as coordinates (first value is the X coordinate and second is the Y coordinate)
                                         // 3: area of the main subject as a circle (first value is the center X coordinate, second is the center Y coordinate, and third is the diameter)
                                         // 4: area of the main subject as a rectangle (first value is the center X coordinate, second is the center Y coordinate, third is the width of the area, and fourth is the height of the area)
+
     struct Calibration_t {              // Camera calibration information
         double FocalLength = 0;         // Focal length (pixels)
         double OpticalCenterX = 0;      // Principal point X (pixels)
         double OpticalCenterY = 0;      // Principal point Y (pixels)
     } Calibration;
+
     struct LensInfo_t {                        // Lens information
         double FStopMin = 0;                   // Min aperture (f-stop)
         double FStopMax = 0;                   // Max aperture (f-stop)
@@ -252,9 +245,10 @@ public:
                                                // 1: no absolute unit of measurement
                                                // 2: inch
                                                // 3: centimeter
-        std::string Make;                      // Lens manufacturer
-        std::string Model;                     // Lens model
+        exif_str_t Make;                       // Lens manufacturer
+        exif_str_t Model;                      // Lens model
     } LensInfo;
+
     struct Geolocation_t {              // GPS information embedded in file
         double Latitude = 0;            // Image latitude expressed as decimal
         double Longitude = 0;           // Image longitude expressed as decimal
@@ -273,9 +267,9 @@ public:
         uint16_t GPSDifferential = 0;   // Differential correction applied to the GPS receiver (may not exist)
                                         // 0: measurement without differential correction
                                         // 1: differential correction applied 
-        std::string GPSMapDatum;        // Geodetic survey data (may not exist)
-        std::string GPSTimeStamp;       // Time as UTC (Coordinated Universal Time) (may not exist)
-        std::string GPSDateStamp;       // A character string recording date and time information relative to UTC (Coordinated Universal Time) YYYY:MM:DD (may not exist)
+        exif_str_t GPSMapDatum;         // Geodetic survey data (may not exist)
+        exif_str_t GPSTimeStamp;        // Time as UTC (Coordinated Universal Time) (may not exist)
+        exif_str_t GPSDateStamp;        // A character string recording date and time information relative to UTC (Coordinated Universal Time) YYYY:MM:DD (may not exist)
         struct Coord_t {
             double degrees = 0;
             double minutes = 0;
@@ -289,12 +283,14 @@ public:
         bool hasOrientation() const;        // Return true if (roll,yaw,pitch) is available
         bool hasSpeed() const;              // Return true if (speedX,speedY,speedZ) is available
     } GeoLocation;
+
     struct GPano_t {                        // Spherical metadata. https://developers.google.com/streetview/spherical-metadata
         double PosePitchDegrees = 0;        // Pitch, measured in degrees above the horizon, for the center in the image. Value must be >= -90 and <= 90.
         double PoseRollDegrees = 0;         // Roll, measured in degrees, of the image where level with the horizon is 0. As roll increases, the horizon rotates counterclockwise in the image. Value must be > -180 and <= 180.
         bool hasPosePitchDegrees() const;   // Return true if PosePitchDegrees is available
         bool hasPoseRollDegrees() const;    // Return true if PoseRollDegrees is available
     } GPano;
+
     struct MicroVideo_t {                   // Google camera video file in metadata
         uint32_t HasMicroVideo = 0;         // not zero if exists
         uint32_t MicroVideoVersion = 0;     // just regularinfo

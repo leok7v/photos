@@ -400,4 +400,5 @@ FodyWeavers.xsd
 crt.h
 quick.h
 stb_image.h
+stb_image_write.h
 version.h
