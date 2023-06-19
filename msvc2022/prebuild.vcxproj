@@ -139,8 +139,8 @@
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)..\scripts\prebuild.bat</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)..\scripts\prebuild.bat</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)..\version.h;$(SolutionDir)..\crt.h;$(SolutionDir)..\quick.h;$(SolutionDir)..\stb_image.h</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)..\version.h;$(SolutionDir)..\crt.h;$(SolutionDir)..\quick.h;$(SolutionDir)..\stb_image.h</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)..\version.h;$(SolutionDir)..\crt.h;$(SolutionDir)..\quick.h;$(SolutionDir)..\stb_image.h;$(SolutionDir)..\stb_image_write.h</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)..\version.h;$(SolutionDir)..\crt.h;$(SolutionDir)..\quick.h;$(SolutionDir)..\stb_image.h;$(SolutionDir)..\stb_image_write.h</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>

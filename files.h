@@ -6,8 +6,8 @@ begin_c
 typedef struct folders_s *folders_t;
 
 typedef struct {
-    folders_t (*open)();
-    int(*enumerate)(folders_t folders, const char* folder);
+    folders_t (*open)(void);
+    int (*enumerate)(folders_t folders, const char* folder);
     // name of the last enumerated folder
     const char* (*foldername)(folders_t folders);
     // number of enumerated files and sub folders inside folder

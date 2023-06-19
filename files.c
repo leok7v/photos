@@ -156,7 +156,7 @@ typedef struct folders_s {
     folders_data_t* data;
 } folders_t_;
 
-static folders_t folders_open() {
+static folders_t folders_open(void) {
     folders_t_* d = (folders_t_*)malloc(sizeof(folders_t_));
     if (d != null) { memset(d, 0, sizeof(*d)); }
     return d;

@@ -153,6 +153,8 @@
     <ClInclude Include="..\quick.h" />
     <ClInclude Include="..\re.h" />
     <ClInclude Include="..\samples\version.h" />
+    <ClInclude Include="..\stb_image.h" />
+    <ClInclude Include="..\TinyEXIF.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\photos.ico" />
@@ -170,12 +172,12 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\crt.c" />
     <ClCompile Include="..\exif.c" />
     <ClCompile Include="..\files.c" />
+    <ClCompile Include="..\implementation.c" />
     <ClCompile Include="..\photos.c" />
-    <ClCompile Include="..\quick.c" />
     <ClCompile Include="..\re.c" />
+    <ClCompile Include="..\TinyEXIF.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
