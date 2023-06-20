@@ -152,11 +152,11 @@
     <ClInclude Include="..\files.h" />
     <ClInclude Include="..\quick.h" />
     <ClInclude Include="..\re.h" />
-    <ClInclude Include="..\samples\version.h" />
     <ClInclude Include="..\stb_image.h" />
     <ClInclude Include="..\stb_image_resize.h" />
     <ClInclude Include="..\stb_image_write.h" />
     <ClInclude Include="..\tiny_exif.h" />
+    <ClInclude Include="..\version.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\photos.ico" />

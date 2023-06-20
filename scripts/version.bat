@@ -8,7 +8,8 @@ for /f "tokens=* usebackq" %%i in (`tzutil /g`) do (
 set "tzrestore=tzutil /s %q%"
 tzutil /s UTC
 set GIT_REDIRECT_STDOUT=nul
-set hash=BADF00D
+rem Local Code:
+set hash=C0DE10CA
 if exist ".git" ( 
   for /f "delims=" %%a in ('git rev-parse --short HEAD') do (
       set hash=%%a

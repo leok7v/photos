@@ -4,30 +4,63 @@
     <Filter Include="res">
       <UniqueIdentifier>{c60b96ea-15fe-4796-86c9-3b9428dc82c7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="runtime">
+      <UniqueIdentifier>{0b8780b9-e456-4b24-bec0-7265e6d0c11d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\photos.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="..\photos.rc" />
-    <ResourceCompile Include="..\version.rc" />
+    <ResourceCompile Include="..\version.rc">
+      <Filter>res</Filter>
+    </ResourceCompile>
+    <ResourceCompile Include="..\photos.rc">
+      <Filter>res</Filter>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\photos.c" />
-    <ClCompile Include="..\re.c" />
-    <ClCompile Include="..\files.c" />
-    <ClCompile Include="..\implementation.c" />
-    <ClCompile Include="..\tiny_exif.c" />
+    <ClCompile Include="..\re.c">
+      <Filter>runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="..\implementation.c">
+      <Filter>runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="..\files.c">
+      <Filter>runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="..\tiny_exif.c">
+      <Filter>runtime</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\samples\version.h" />
-    <ClInclude Include="..\crt.h" />
-    <ClInclude Include="..\quick.h" />
-    <ClInclude Include="..\re.h" />
-    <ClInclude Include="..\files.h" />
-    <ClInclude Include="..\stb_image.h" />
-    <ClInclude Include="..\tiny_exif.h" />
-    <ClInclude Include="..\stb_image_resize.h" />
-    <ClInclude Include="..\stb_image_write.h" />
+    <ClInclude Include="..\re.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\quick.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\crt.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\files.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\stb_image.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\stb_image_resize.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\stb_image_write.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\tiny_exif.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="..\version.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\photos.ico">
+      <Filter>res</Filter>
+    </Image>
   </ItemGroup>
 </Project>
