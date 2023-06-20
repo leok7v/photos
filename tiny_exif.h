@@ -32,6 +32,7 @@
 */
 
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
 #define TINYEXIF_MAJOR_VERSION 1
@@ -70,8 +71,8 @@ typedef const char* exif_str_t;
 
 typedef struct exif_info_s {
 
-    char strings[64 * 1024]; // EXIF UTF-8 string storage
-    char* next = nullptr;    // next unused EXIF UTF-8 string storage
+    char strings[64 * 1024];        // EXIF UTF-8 string storage
+    char* next;                     // next unused EXIF UTF-8 string storage
 
     // Data fields
     uint32_t Fields;                // Store if EXIF and/or XMP data fields are available
@@ -261,21 +262,8 @@ typedef struct exif_info_s {
 extern "C" {
 #endif
 
-
-void exif_init_from_memory(exif_info_t* ei, const uint8_t* data, unsigned length);
-void exif_init_from_stream(exif_info_t* ei, exif_stream_t* stream);
-
-// 'stream' an interface to fetch JPEG image stream
-// 'data'   a pointer to a JPEG image
-// 'bytes'  number of bytes in the JPEG image
-//  returns PARSE_SUCCESS (0) on success with 'result' filled out
-//          error code otherwise, as defined by the PARSE_* macros
-int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream);
-int exif_parse_from_memory(exif_info_t* ei, const uint8_t* data, unsigned bytes);
-
-// Set all data members to default values.
-// Should be called before parsing a new stream.
-void exif_clear(exif_info_t* ei);
+void exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
+void exif_from_stream(exif_info_t* ei, exif_stream_t* stream);
 
 #ifdef __cplusplus
 }

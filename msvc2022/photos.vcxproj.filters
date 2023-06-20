@@ -18,7 +18,7 @@
     <ClCompile Include="..\exif.c" />
     <ClCompile Include="..\files.c" />
     <ClCompile Include="..\implementation.c" />
-    <ClCompile Include="..\TinyEXIF.cpp" />
+    <ClCompile Include="..\tiny_exif.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\samples\version.h" />
@@ -27,6 +27,8 @@
     <ClInclude Include="..\re.h" />
     <ClInclude Include="..\files.h" />
     <ClInclude Include="..\stb_image.h" />
-    <ClInclude Include="..\TinyEXIF.h" />
+    <ClInclude Include="..\tiny_exif.h" />
+    <ClInclude Include="..\stb_image_resize.h" />
+    <ClInclude Include="..\stb_image_write.h" />
   </ItemGroup>
 </Project>

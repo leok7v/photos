@@ -31,17 +31,18 @@
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "TinyEXIF.h"
-#include "crt.h"
+#include "tiny_exif.h"
+#include <stdio.h>
 #include <float.h>
 #include <math.h>
+#include <string.h>
+
+#define null ((void*)0)
 
 #ifdef _MSC_VER
-int strcasecmp(const char* a, const char* b) {
+static int strcasecmp(const char* a, const char* b) {
     return _stricmp(a, b);
 }
-#else
-#include <string.h>
 #endif
 
 enum JPEG_MARKERS {
@@ -190,16 +191,16 @@ static double parse_rational(const uint8_t* buf, bool intel, bool isSigned) {
 }
 
 static exif_str_t parse_string(entry_parser_t* p, const uint8_t* buf,
-    unsigned num_components,
-    unsigned value,
-    unsigned base,
-    unsigned count,
-    bool intel)
-{
-    if (p->info->next == nullptr) { p->info->next = p->info->strings; }
+    uint32_t num_components,
+    uint32_t value,
+    uint32_t base,
+    uint32_t count,
+    bool intel) {
     char* res = p->info->next;
     if (num_components <= 4) {
-        fatal_if( (size_t)(p->info->next - p->info->strings) <= num_components + 1);
+        if ((size_t)(p->info->next - p->info->strings + sizeof(p->info->strings)) <= num_components + 1) {
+            return "";
+        }
         p->info->next += num_components + 1;
         char j = intel ? 0 : 24;
         char j_m = intel ? -8 : 8;
@@ -207,16 +208,16 @@ static exif_str_t parse_string(entry_parser_t* p, const uint8_t* buf,
             res[i] = (value >> j) & 0xff;
         if (num_components > 0 && res[num_components - 1] == 0)
             res[num_components - 1] = 0;
-    } else if (base+value+num_components <= count) {
-        const char* const sz((const char*)buf + base + value);
-        unsigned num(0);
-        while (num < num_components && sz[num] != 0)
-            ++num;
-        while (num && sz[num-1] == ' ')
-            --num;
-        fatal_if( (size_t)(p->info->next - p->info->strings) <= num + 1);
+    } else if (base + value + num_components <= count) {
+        const char* const s = (const char*)buf + base + value;
+        uint32_t num = 0;
+        while (num < num_components && s[num] != 0) { ++num; }
+        while (num && s[num-1] == ' ') { --num; }
+        if ((size_t)(p->info->next - p->info->strings + sizeof(p->info->strings)) <= num + 1) {
+            return "";
+        }
         p->info->next += num + 1;
-        memcpy(res, sz, num);
+        memcpy(res, s, num);
         res[num] = 0;
     }
     return res;
@@ -295,17 +296,29 @@ static bool parser_fetch_float_as_doble(entry_parser_t* p, double* val) {
     return true;
 }
 
-void exif_init_from_stream(exif_info_t* ei, exif_stream_t* stream) {
+// 'stream' an interface to fetch JPEG image stream
+// 'data'   a pointer to a JPEG image
+// 'bytes'  number of bytes in the JPEG image
+//  returns PARSE_SUCCESS (0) on success with 'result' filled out
+//          error code otherwise, as defined by the PARSE_* macros
+int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream);
+int exif_parse_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
+
+// Set all data members to default values.
+// Should be called before parsing a new stream.
+void exif_clear(exif_info_t* ei);
+
+void exif_from_stream(exif_info_t* ei, exif_stream_t* stream) {
     exif_parse_from_stream(ei, stream);
 }
 
-void exif_init_from_memory(exif_info_t* ei, const uint8_t* data, unsigned length) {
+void exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t length) {
     exif_parse_from_memory(ei, data, length);
 }
 
-static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, unsigned bytes);
+static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
 // Parse tag as Image IFD.
-static void exif_parse_ifd_image(entry_parser_t* p, unsigned&, unsigned&);
+static void exif_parse_ifd_image(entry_parser_t* p, uint32_t* sub_ifd, uint32_t* gps_offset);
 // Parse tag as Exif IFD.
 static void exif_parse_ifd(entry_parser_t* p);
 // Parse tag as GPS IFD.
@@ -314,7 +327,7 @@ static void exif_parse_ifd_gps(entry_parser_t* p);
 static void exif_parse_ifd_maker_note(entry_parser_t* p);
 
 // Parse tag as Image IFD
-static void exif_parse_ifd_image(entry_parser_t* p, unsigned& exif_sub_ifd_offset, unsigned& gps_sub_ifd_offset) {
+static void exif_parse_ifd_image(entry_parser_t* p, uint32_t* exif_sub_ifd_offset, uint32_t* gps_sub_ifd_offset) {
     switch (p->tag) {
         case 0x0102:
             // Bits per sample
@@ -379,11 +392,11 @@ static void exif_parse_ifd_image(entry_parser_t* p, unsigned& exif_sub_ifd_offse
             break;
         case 0x8769:
             // EXIF SubIFD offset
-            exif_sub_ifd_offset = get_sub_ifd(p);
+            *exif_sub_ifd_offset = get_sub_ifd(p);
             break;
         case 0x8825:
             // GPS IFS offset
-            gps_sub_ifd_offset = get_sub_ifd(p);
+            *gps_sub_ifd_offset = get_sub_ifd(p);
             break;
         default:
             // Try to parse as EXIF tag, as some images store them in here
@@ -553,12 +566,12 @@ static void exif_parse_ifd_maker_note(entry_parser_t* p) {
     if (0 != strcasecmp(p->info->Make, "DJI"))
         return;
     int num_entries = parse16(p->data + p->offs, p->alignIntel);
-    if (uint32_t(2 + 12 * num_entries) > p->length)
+    if ((uint32_t)(2 + 12 * num_entries) > p->length)
         return;
     parser_init(p, off+2);
     parse_tag(p);
     --num_entries;
-    exif_str_t maker = nullptr;
+    exif_str_t maker = null;
     if (p->tag == 1 && parser_fetch_str(p, &maker)) {
         if (0 == strcasecmp(maker, "DJI")) {
             while (--num_entries >= 0) {
@@ -671,29 +684,20 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
     exif_clear(ei);
     // Sanity check: all JPEG files start with 0xFFD8 and end with 0xFFD9
     // This check also ensures that the user has supplied a correct value for bytes.
-    const uint8_t* buf(stream->get(stream, 2));
-    if (buf == nullptr || buf[0] != JM_START || buf[1] != JM_SOI)
+    const uint8_t* buf = stream->get(stream, 2);
+    if (buf == null || buf[0] != JM_START || buf[1] != JM_SOI)
         return PARSE_INVALID_JPEG;
     // Scan for JM_APP1 header (bytes 0xFF 0xE1) and parse its length.
     // Exit if both EXIF and XMP sections were parsed.
-
-//  struct APP1S {
-//      uint32_t& val;
-//      inline APP1S(uint32_t& v) : val(v) {}
-//      inline operator uint32_t () const { return val; }
-//      inline operator uint32_t& () { return val; }
-//      inline int operator () (int code=PARSE_ABSENT_DATA) const { return val & FIELD_ALL ? (int)PARSE_SUCCESS : code; }
-//  } app1s(Fields);
     uint32_t apps1 = ei->Fields;
-
-    while ((buf = stream->get(stream, 2)) != nullptr) {
+    while ((buf = stream->get(stream, 2)) != null) {
         // find next marker;
         // in cases of markers appended after the compressed data,
         // optional JM_START fill bytes may precede the marker
         if (*buf++ != JM_START)
             break;
         uint8_t marker;
-        while ((marker=buf[0]) == JM_START && (buf = stream->get(stream, 1)) != nullptr);
+        while ((marker=buf[0]) == JM_START && (buf = stream->get(stream, 1)) != null);
         // select marker
         uint16_t sectionLength;
         switch (marker) {
@@ -714,12 +718,14 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
             case JM_EOI: // no data? not good
                 return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_ABSENT_DATA;
             case JM_APP1:
-                if ((buf=stream->get(stream, 2)) == nullptr)
+                buf = stream->get(stream, 2);
+                if (buf == null)
                     return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_INVALID_JPEG;
                 sectionLength = parse16(buf, false);
-                if (sectionLength <= 2 || (buf=stream->get(stream, sectionLength-=2)) == nullptr)
+                if (sectionLength <= 2 || (buf=stream->get(stream, sectionLength-=2)) == null)
                     return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_INVALID_JPEG;
-                switch (int ret = exif_parse_from_segment(ei, buf, sectionLength)) {
+                int ret = exif_parse_from_segment(ei, buf, sectionLength);
+                switch (ret) {
                     case PARSE_ABSENT_DATA:
                         // TODO: XMP
                         break;
@@ -733,7 +739,7 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                 break;
             default:
                 // skip the section
-                if ((buf=stream->get(stream, 2)) == nullptr ||
+                if ((buf=stream->get(stream, 2)) == null ||
                     (sectionLength = parse16(buf, false)) <= 2 ||
                     !stream->skip(stream, sectionLength-2))
                     return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_INVALID_JPEG;
@@ -752,14 +758,14 @@ typedef struct exif_stream_buffer_s {
 static const uint8_t* get(exif_stream_t* stream, uint32_t bytes) {
     exif_stream_buffer_t* sb = (exif_stream_buffer_t*)stream;
     const uint8_t* next = sb->it + bytes;
-    if (next > sb->end) return nullptr;
+    if (next > sb->end) return null;
     const uint8_t* begin = sb->it;
     sb->it = next;
     return begin;
 }
 
 static bool skip(exif_stream_t* stream, uint32_t bytes) {
-    return stream->get(stream, bytes) != nullptr;
+    return stream->get(stream, bytes) != null;
 }
 
 int exif_parse_from_memory(exif_info_t* ei, const uint8_t* buf, uint32_t bytes) {
@@ -817,7 +823,7 @@ static void geolocation_parse_coords(exif_info_t* ei) {
 // PARAM: 'data' start of the EXIF TIFF, which must be the bytes "Exif\0\0".
 // PARAM: 'bytes' bytes of buffer
 
-static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, unsigned bytes) {
+static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, uint32_t bytes) {
     unsigned offs = 6; // current offset into buffer
     if (data == null || bytes < offs)
         return PARSE_ABSENT_DATA;
@@ -847,6 +853,7 @@ static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, unsigne
     entry_parser_t p = {0};
     p.info = ei;
     p.data = data;
+    p.tiff_header_start = offs;
     p.bytes = bytes;
     p.offs = offs;
     p.alignIntel = alignIntel;
@@ -874,7 +881,7 @@ static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, unsigne
     parser_init(&p, offs + 2);
     while (--num_entries >= 0) {
         parse_tag(&p);
-        exif_parse_ifd_image(&p, exif_sub_ifd_offset, gps_sub_ifd_offset);
+        exif_parse_ifd_image(&p, &exif_sub_ifd_offset, &gps_sub_ifd_offset);
     }
     // Jump to the EXIF SubIFD if it exists and parse all the information
     // there. Note that it's possible that the EXIF SubIFD doesn't exist.
@@ -910,7 +917,7 @@ static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, unsigne
 
 void exif_clear(exif_info_t* ei) {
     ei->Fields = FIELD_NA;
-    ei->next = nullptr;
+    ei->next = ei->strings;
     // Strings
     ei->ImageDescription  = "";
     ei->Make              = "";
