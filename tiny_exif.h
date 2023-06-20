@@ -262,8 +262,8 @@ typedef struct exif_info_s {
 extern "C" {
 #endif
 
-void exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
-void exif_from_stream(exif_info_t* ei, exif_stream_t* stream);
+int exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
+int exif_from_stream(exif_info_t* ei, exif_stream_t* stream);
 
 #ifdef __cplusplus
 }

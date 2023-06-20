@@ -26,10 +26,8 @@ static void paint(uic_t* ui) {
 }
 
 typedef struct exif_extra_s {
-    const char* DateTimeOriginal;   // 0x9003
-    const char* ImageDescription;   // 0x010e
-    double geo_longitude;           // e.g. 54.9700627,82.7846017
-    double geo_latitude;            // e.g. 82.7846017
+    char DateTimeOriginal[1024];   // 0x9003
+    char ImageDescription[1024];   // 0x010e
 } exif_extra_t;
 
 static int total;
@@ -37,163 +35,87 @@ static int total_yy;
 static int total_yy_mm;
 static int total_yy_mm_dd;
 
-void* exif_of_jpeg(uint8_t *data, int64_t bytes, int32_t *bytes_in_exif) {
-    // Check for valid JPEG marker
-    if (bytes < 2 || data[0] != 0xFF || data[1] != 0xD8) {
-        return null;
-    }
-    // Search for APP1 marker (EXIF marker)
-    int64_t pos = 2;
-    while (pos < bytes - 1) {
-        if (data[pos] == 0xFF && data[pos + 1] == 0xE1) {
-            // Found APP1 marker
-            int32_t exif_length = (data[pos + 2] << 8) + data[pos + 3];
-            *bytes_in_exif = exif_length;
-            return &data[pos + 4];
-        }
-        pos++;
-    }
-    // No APP1 marker found
-    return null;
-}
 
-// Convert double value to rational format
-static void double_to_rational(double value, int32_t* numerator, uint32_t* denominator) {
-    double abs_value = fabs(value);
-    double fractional_part = fmod(abs_value, 1.0);
-    double integral_part = abs_value - fractional_part;
-    // Find the greatest common divisor (GCD) between the numerator and denominator
-    uint32_t gcd = 1;
-    const uint32_t max_denominator = UINT32_MAX / 2; // To avoid overflow
-    for (uint32_t i = 1; i <= max_denominator; i++) {
-        double error = fabs(fractional_part - (fractional_part * i) / (double)i);
-        if (error < 1e-9) {
-            *numerator = (uint32_t)(integral_part * i + fractional_part * i);
-            *denominator = i;
-            gcd = i;
-            break;
-        }
-    }
-    // Simplify the fraction by dividing the numerator and denominator by their GCD
-    *numerator /= gcd;
-    *denominator /= gcd;
-    // If the value was negative, negate the numerator
-    if (value < 0) {
-        *numerator = -*numerator;
+static void big_endian_32(uint8_t* p, uint32_t v) {
+    for (int i = 0; i < 4; i++) {
+        p[3 - i] = (uint8_t)(v & 0xFF);
+        v >>= 8;
     }
 }
 
-#if 0
-void insert_exif_description_info_jpeg(const uint8_t* data, int64_t bytes, const exif_extra_t* extra, uint8_t* output_jpeg_with_exif, int64_t max_output_bytes) {
+static int32_t append_exif_description(const uint8_t* data, int64_t bytes, 
+        const exif_extra_t* extra, uint8_t* output, int64_t max_output_bytes) {
     // Check if there is enough space to add the EXIF data
-    int64_t required_bytes = bytes + 46 + strlen(extra->DateTimeOriginal) + strlen(extra->ImageDescription);
+memset(output, 0xFF, 256);
+    int64_t required_bytes = bytes + 43 + strlen(extra->DateTimeOriginal) + strlen(extra->ImageDescription);
     fatal_if(required_bytes > max_output_bytes);
-    // Create the APP1 marker segment
+    fatal_if(data[0] != 0xFF || data[1] != 0xD8); // SOI
+    uint8_t* out = output;
+    memcpy(out, data, 2);
+    out += 2;
     uint8_t app1_marker[] = {
         0xFF, 0xE1, // APP1 marker
-        0x00, 0x2A, // Length of APP1 segment (42 bytes)
+        0x00, 0x00, // Length of APP1 segment (44 bytes)
         0x45, 0x78, 0x69, 0x66, // "Exif" ASCII characters
         0x00, 0x00, // Null terminator (required for some EXIF parsers)
         0x4D, 0x4D, // "MM" (Big-endian) identifier
         0x00, 0x2A, // TIFF header (42 bytes)
         0x00, 0x00, 0x00, 0x08, // IFD0 offset (8 bytes)
     };
-    // Copy the original JPEG data before the APP1 segment
-    memcpy(output_jpeg_with_exif, data, bytes);
-    // Append the APP1 marker segment
-    memcpy(output_jpeg_with_exif + bytes, app1_marker, sizeof(app1_marker));
-    bytes += sizeof(app1_marker);
+    uint8_t* app1 = out;
+    memcpy(out, app1_marker, sizeof(app1_marker)); 
+    out += sizeof(app1_marker);
+    // num_entries = 2
+    memcpy(out, "\x00\x02", 2); 
+    out += 2;
     // Append DateTimeOriginal tag (0x9003)
     uint8_t datetime_original_tag[] = {
         0x90, 0x03, // Tag ID (0x9003)
-        0x02, 0x00, // Data type (ASCII string)
+        0x00, 0x02, // Data type (ASCII string)
         0x00, 0x00, 0x00, 0x14, // Data length (20 bytes)
+        0x00, 0x00, 0x00, 0x00, // Offset (because length > 4) or value
     };
-    memcpy(output_jpeg_with_exif + bytes, datetime_original_tag, sizeof(datetime_original_tag));
-    bytes += sizeof(datetime_original_tag);
-    // Append DateTimeOriginal value
-    size_t datetime_original_len = strlen(extra->DateTimeOriginal);
-    memcpy(output_jpeg_with_exif + bytes, extra->DateTimeOriginal, datetime_original_len);
-    bytes += datetime_original_len;
+    static_assertion(sizeof(datetime_original_tag) == 12);
+    uint8_t* datetime_original = out;
+    memcpy(out, datetime_original_tag, sizeof(datetime_original_tag));
+    out += sizeof(datetime_original_tag);
     // Append ImageDescription tag (0x010E)
     uint8_t image_description_tag[] = {
         0x01, 0x0E, // Tag ID (0x010E)
-        0x02, 0x00, // Data type (ASCII string)
-        0x00, 0x00, 0x00, 0x00, // Data length (initialized to placeholder for now, will be updated later
+        0x00, 0x02, // Data type (ASCII string)
+        0x00, 0x00, 0x00, 0x00, // Data length (initialized to placeholder for now, will be updated later)
+        0x00, 0x00, 0x00, 0x00, // Offset (if length > 4) or value
     };
-    memcpy(output_jpeg_with_exif + bytes, image_description_tag, sizeof(image_description_tag));
-    bytes += sizeof(image_description_tag);
-    // Append ImageDescription value
-    size_t image_description_len = strlen(extra->ImageDescription);
-    memcpy(output_jpeg_with_exif + bytes, extra->ImageDescription, image_description_len);
-    bytes += image_description_len;
-    // TODO: Append geolocation information (to be implemented)
-    // Add the final null terminator (required for some EXIF parsers)
-    output_jpeg_with_exif[bytes] = 0;
-}
-#endif
+    static_assertion(sizeof(image_description_tag) == 12);
+    uint8_t* image_description = out;
+    memcpy(out, image_description_tag, sizeof(image_description_tag));
+    out += sizeof(image_description_tag);
+    // DateTimeOriginal
+    size_t datetime_original_len = strlen(extra->DateTimeOriginal) + 1;
+    assert(datetime_original_len == 0x14);
+    // offset to the data:
+    big_endian_32(datetime_original + 8, (uint32_t)(out - (app1 + 10)));
+    memcpy(out, extra->DateTimeOriginal, datetime_original_len);
+    out += datetime_original_len;
 
-static void insert_exif_description_info_jpeg(const uint8_t* data, int64_t bytes, 
-        const exif_extra_t* extra, 
-        uint8_t* output_jpeg_with_exif, int64_t max_output_bytes) {
-    int64_t required_bytes = bytes + 256 + strlen(extra->DateTimeOriginal) + 
-        strlen(extra->ImageDescription);
-    fatal_if(required_bytes > max_output_bytes);
-    // Create the APP1 marker segment
-    uint8_t app1_marker[] = {
-        0xFF, 0xE1, 0x00, 0x2A, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08
-    };
-    // Copy the original JPEG data before the APP1 segment
-    memcpy(output_jpeg_with_exif, data, bytes);
-    // Append the APP1 marker segment
-    memcpy(output_jpeg_with_exif + bytes, app1_marker, sizeof(app1_marker));
-    bytes += sizeof(app1_marker);
-    // Append DateTimeOriginal tag (0x9003)
-    uint8_t datetime_original_tag[] = {
-        0x90, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x14
-    };
-    memcpy(output_jpeg_with_exif + bytes, datetime_original_tag, sizeof(datetime_original_tag));
-    bytes += sizeof(datetime_original_tag);
-    // Append DateTimeOriginal value
-    size_t datetime_original_len = strlen(extra->DateTimeOriginal);
-    memcpy(output_jpeg_with_exif + bytes, extra->DateTimeOriginal, datetime_original_len);
-    bytes += datetime_original_len;
-    // Append ImageDescription tag (0x010E)
-    uint8_t image_description_tag[] = {
-        0x01, 0x0E, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00
-    };
-    memcpy(output_jpeg_with_exif + bytes, image_description_tag, sizeof(image_description_tag));
-    bytes += sizeof(image_description_tag);
-    // Append ImageDescription value
-    size_t image_description_len = strlen(extra->ImageDescription);
-    memcpy(output_jpeg_with_exif + bytes, extra->ImageDescription, image_description_len);
-    bytes += image_description_len;
-    // Append geolocation information
-    uint8_t geolocation_tag[] = {
-        0x88, 0x25, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00
-    };
-    memcpy(output_jpeg_with_exif + bytes, geolocation_tag, sizeof(geolocation_tag));
-    bytes += sizeof(geolocation_tag);
-    // Convert geolocation longitude to rational format
-    int32_t geo_longitude_numerator = 0;
-    uint32_t geo_longitude_denominator = 0;
-    double_to_rational(extra->geo_longitude, &geo_longitude_numerator, &geo_longitude_denominator);
-    // Append geolocation longitude
-    memcpy(output_jpeg_with_exif + bytes, &geo_longitude_numerator, sizeof(geo_longitude_numerator));
-    bytes += sizeof(geo_longitude_numerator);
-    memcpy(output_jpeg_with_exif + bytes, &geo_longitude_denominator, sizeof(geo_longitude_denominator));
-    bytes += sizeof(geo_longitude_denominator);
-    // Convert geolocation latitude to rational format
-    int32_t geo_latitude_numerator = 0;
-    uint32_t geo_latitude_denominator = 0;
-    double_to_rational(extra->geo_latitude, &geo_latitude_numerator, &geo_latitude_denominator);
-    // Append geolocation latitude
-    memcpy(output_jpeg_with_exif + bytes, &geo_latitude_numerator, sizeof(geo_latitude_numerator));
-    bytes += sizeof(geo_latitude_numerator);
-    memcpy(output_jpeg_with_exif + bytes, &geo_latitude_denominator, sizeof(geo_latitude_denominator));
-    bytes += sizeof(geo_latitude_denominator);
-    // Add the final null terminator (required for some EXIF parsers)
-    output_jpeg_with_exif[bytes] = 0;
+    // ImageDescription
+    size_t image_description_len = strlen(extra->ImageDescription) + 1;
+    big_endian_32(image_description + 4, (uint32_t)image_description_len);
+    if (image_description_len < 4) {
+        memcpy(image_description + 8, extra->ImageDescription, image_description_len);
+    } else {
+        memcpy(out, extra->ImageDescription, image_description_len);
+        big_endian_32(image_description + 8, (uint32_t)(out - (app1 + 10)));
+        out += image_description_len;
+    }
+    big_endian_32(out, 0); // last IFD record
+    out += 4;
+    size_t app_len = out - app1;
+    app1[3] = (uint8_t)((app_len >> 0) & 0xFF);
+    app1[2] = (uint8_t)((app_len >> 8) & 0xFF);
+    memcpy(out, data + 2, bytes - 2);
+    out += bytes - 2;
+    return (int32_t)(out - output);
 }
 
 static void yymmdd(const char* fn, int verify, int* year, int* month, int* day) {
@@ -207,42 +129,44 @@ static void yymmdd(const char* fn, int verify, int* year, int* month, int* day) 
         d = -1;
         int _y = -1;
         int _m = -1;
-        int _d = -1;
         if (isdigit(fn[i])) {
             if (sscanf(fn + i, "%d-%d-%d", &m, &d, &y) == 3) {
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/%02d", y, m, d);
+                if (m > 12 && d <= 12) { int swap = m; m = d; d = swap; }
+//              traceln("%4d/%02d/%02d", y, m, d);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d'%d'%d", &m, &d, &y) == 3) {
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/%02d", y, m, d);
+                if (m > 12 && d <= 12) { int swap = m; m = d; d = swap; }
+//              traceln("%4d/%02d/%02d", y, m, d);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d`%d`%d", &m, &d, &y) == 3) {
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/%02d", y, m, d);
+                if (m > 12 && d <= 12) { int swap = m; m = d; d = swap; }
+//              traceln("%4d/%02d/%02d", y, m, d);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d`%d", &m, &y) == 2) {
                 d = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 d = -1;
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d'%d", &m, &y) == 2) {
                 d = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d,%d", &m, &y) == 2) {
                 d = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "%d-%d", &_y, &_m) == 2) {
                 if (_y >= 1990 && 1 <= _m && _m <= 12) {
                     y = _y;
                     m = _m;
                     d = -1;
-                    traceln("%4d/%02d/??", y, m);
+//                  traceln("%4d/%02d/??", y, m);
                     if (verify < 0 || verify == y) { break; }
                 }
             }
@@ -251,7 +175,7 @@ static void yymmdd(const char* fn, int verify, int* year, int* month, int* day) 
                 d = -1;
                 m = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 if (verify < 0 || verify == y) { break; }
             }
         } else if (fn[i] == '~') {
@@ -259,13 +183,13 @@ static void yymmdd(const char* fn, int verify, int* year, int* month, int* day) 
                 d = -1;
                 m = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 if (verify < 0 || verify == y) { break; }
             } else if (sscanf(fn + i, "~ %d", &y) == 1) {
                 d = -1;
                 m = -1;
                 if (y < 100) { y += 1900; }
-                traceln("%4d/%02d/??", y, m);
+//              traceln("%4d/%02d/??", y, m);
                 if (verify < 0 || verify == y) { break; }
             }
         } 
@@ -294,15 +218,18 @@ static void change_file_creation_and_write_time(const char* fn, int year, int mo
         SYSTEMTIME st = {0};
         GetFileTime(file, &ft, null, null); // creation, access, write
         FileTimeToSystemTime(&ft, &st);
-        assert(year > 1990 && year < 2030);
+        assert(year > 1900 && year < 2030);
         st.wYear  = (uint16_t)year;
         if (month > 0)   { st.wMonth  = (uint16_t)month; }
         if (day > 0)     { st.wDay    = (uint16_t)day; }
         if (hour > 0)    { st.wHour   = (uint16_t)hour; }
         if (minute > 0)  { st.wMinute = (uint16_t)minute; }
         if (second > 0)  { st.wSecond = (uint16_t)second; }
-        fatal_if_false(SystemTimeToFileTime(&st, &ft));
-        fatal_if_false(SetFileTime(file, &ft, NULL, &ft));
+        if (SystemTimeToFileTime(&st, &ft)) {
+            fatal_if_false(SetFileTime(file, &ft, NULL, &ft));
+        } else {
+            traceln("bad time: %s", fn);
+        }
         fatal_if_false(CloseHandle(file));
     }
 }
@@ -311,25 +238,27 @@ static void change_file_creation_and_write_time(const char* fn, int year, int mo
 //                                 unsigned char *output_pixels, int output_w, int output_h, int output_stride_in_bytes,
 //                                 int num_channels);
 
-typedef struct write_context_s write_context_t;
+typedef struct writer_context_s writer_context_t;
 
-typedef struct write_context_s {
+typedef struct writer_context_s {
     byte memory[16 * 1024 * 1024];
     int32_t written;
-} write_context_t;
+} writer_context_t;
+
+static writer_context_t writer_context;
+static byte jpeg_memory[16 * 1024 * 1024];
 
 void jpeg_writer(void *context, void* data, int bytes) {
-    write_context_t* write_context = (write_context_t*)context;
-    fatal_if(write_context->written + bytes > sizeof(write_context->memory));
-    memcpy(write_context->memory + write_context->written, data, bytes);
-    write_context->written += bytes;
+    writer_context_t* wc = (writer_context_t*)context;
+    fatal_if(wc->written + bytes > sizeof(wc->memory));
+    memcpy(wc->memory + wc->written, data, bytes);
+    wc->written += bytes;
 }
 
 static bool jpeg_write(uint8_t* data, int w, int h, int c) {
-    static write_context_t write_context;
-    write_context.written = 0;
-    int r = stbi_write_jpg_to_func(jpeg_writer, &write_context, w, h, c, data, 85);
-    traceln("r: %d written: %d", r, write_context.written);
+    writer_context.written = 0;
+    int r = stbi_write_jpg_to_func(jpeg_writer, &writer_context, w, h, c, data, 85);
+//  traceln("r: %d written: %d", r, writer_context.written);
     return r;
 }
 
@@ -368,6 +297,24 @@ static void append_pathname(const char* relative) {
     }
 }
 
+
+static const char* words(const char* fn) {
+    static char desc[1024];
+    int n = (int)strlen(fn);
+    int k = 0;
+    for (int i = 0; i < n && k < countof(desc) - 2; i++) {
+        if (fn[i] == '_' || fn[i] == '.' || fn[i] == '-') {
+            desc[k] = 0x20;
+        } else {
+            desc[k] = fn[i];
+        }
+        k++;
+    }
+    desc[k] = 0;
+    return desc;
+}
+
+
 static void process(const char* pathname) {
     total++;
     void* data = null;
@@ -376,9 +323,10 @@ static void process(const char* pathname) {
     int w = 0, h = 0, c = 0;
     uint8_t* pixels = stbi_load(pathname, &w, &h, &c, 0);
     fatal_if_null(pixels);
-    int32_t bytes_in_exif = 0;
-    void* app1 = exif_of_jpeg(data, bytes, &bytes_in_exif);
-    traceln("%s %d %dx%d:%d exif:%d", pathname, bytes, w, h, c, bytes_in_exif);
+    exif_info_t exif = {0};
+    bool has_exif = exif_from_memory(&exif, data, (uint32_t)bytes) == 0;
+    has_exif = has_exif && exif.ImageHeight > 0 && exif.ImageHeight > 0;
+//  traceln("%s %d %dx%d:%d exif: %d", pathname, bytes, w, h, c, has_exif);
     const char* relative = pathname + strlen(app.argv[1]) + 1;
     int folder_year = -1;
     int year = -1;
@@ -393,10 +341,8 @@ static void process(const char* pathname) {
     } else {
         if (folder_year < 100) { folder_year += 1900; };
         yymmdd(relative, folder_year, &year, &month, &day);
-        traceln("%06d %s %04d %s", total, relative, folder_year, app1 != null ? "EXIF" : "");
+//      traceln("%06d %s %04d %s", total, relative, folder_year, has_exif ? "EXIF" : "");
     }
-    exif_info_t exif = {0};
-    exif_from_memory(&exif, data, (uint32_t)bytes);
     int exif_year = -1;
     int exif_month = -1;
     int exif_day = -1;
@@ -407,7 +353,7 @@ static void process(const char* pathname) {
         if (sscanf(exif.DateTimeOriginal, "%d:%d:%d %d:%d:%d",
             &exif_year, &exif_month,  &exif_day,
             &exif_hour, &exif_minute, &exif_second) != 6) {
-            traceln("exif.DateTimeOriginal: %s", exif.DateTimeOriginal);
+//          traceln("exif.DateTimeOriginal: %s", exif.DateTimeOriginal);
             exif_year = -1; exif_month = -1; exif_day = -1;
             exif_hour = -1; exif_minute = -1; exif_second = -1;
         }
@@ -416,7 +362,7 @@ static void process(const char* pathname) {
         if (sscanf(exif.DateTime, "%d:%d:%d %d:%d:%d",
             &exif_year, &exif_month,  &exif_day,
             &exif_hour, &exif_minute, &exif_second) != 6) {
-            traceln("exif.DateTime: %s", exif.DateTime);
+//          traceln("exif.DateTime: %s", exif.DateTime);
             exif_year = -1; exif_month = -1; exif_day = -1;
             exif_hour = -1; exif_minute = -1; exif_second = -1;
         }
@@ -425,7 +371,7 @@ static void process(const char* pathname) {
         if (sscanf(exif.DateTimeDigitized, "%d:%d:%d %d:%d:%d",
             &exif_year, &exif_month,  &exif_day,
             &exif_hour, &exif_minute, &exif_second) != 6) {
-            traceln("exif.DateTimeDigitized: %s", exif.DateTimeDigitized);
+//          traceln("exif.DateTimeDigitized: %s", exif.DateTimeDigitized);
             exif_year = -1; exif_month = -1; exif_day = -1;
             exif_hour = -1; exif_minute = -1; exif_second = -1;
         }
@@ -439,8 +385,10 @@ static void process(const char* pathname) {
         second = exif_second;
     }
     if (year < 0) { year = folder_year; }
+    if (month > 12) { month = -1; }
+    if (day   > 31) { day   = -1; }
     if (strlen(exif.ImageDescription) > 0) {
-        traceln("exif.ImageDescription: %s", exif.ImageDescription);
+//      traceln("exif.ImageDescription: %s", exif.ImageDescription);
     }
     files.mkdirs(output_folder);
     if (folder_year > 1900 && abs(year - folder_year) > 2) { year = folder_year; }
@@ -457,10 +405,41 @@ static void process(const char* pathname) {
     append_pathname(relative);
     traceln("%s", output_path);
     jpeg_write(pixels, w, h, c);
-    if (app1 != null) {
-        // TODO: merge exifs?
+    assert(year > 1900);
+    void*   write_data = writer_context.memory;
+    int32_t write_bytes = writer_context.written;
+    if (has_exif) {
+//      traceln("TODO: merge exifs?");
+    } else {
+        exif_extra_t extra = {0};
+        int m  =  month  < 1 ?  6 : month;
+        int d  =  day    < 1 ? 15 : day;
+        int hr =  hour   < 1 ? 11 : hour;
+        int mn =  minute < 1 ? 58 : minute;
+        int sc =  second < 1 ? 29  : second;
+        snprintf(extra.DateTimeOriginal, countof(extra.DateTimeOriginal), 
+            "%04d:%02d:%02d %02d:%02d:%02d", 
+            year, m, d, hr, mn, sc);
+        snprintf(extra.ImageDescription, countof(extra.ImageDescription),
+            "%s", 
+            words(output_path + strlen(output_folder) + 1));
+        write_bytes = append_exif_description(writer_context.memory, writer_context.written, 
+            &extra, jpeg_memory, sizeof(jpeg_memory));
+        write_data = jpeg_memory;
+        assert(write_bytes > writer_context.written);
     }
-//  exif_extra_t extra;
+    FILE* file = fopen(output_path, "wb");
+    size_t k = fwrite(write_data, 1, write_bytes, file);
+    fatal_if(k != write_bytes);
+    fclose(file);
+    if (!has_exif) {
+        memset(&exif, 0, sizeof(exif));
+        int r = exif_from_memory(&exif, write_data, write_bytes);
+        fatal_if(r != PARSE_SUCCESS);
+        assert(exif.ImageDescription[0] != 0);
+        assert(exif.DateTimeOriginal[0] != 0);
+    }
+    change_file_creation_and_write_time(output_path, year, month, day, hour, minute, second);
 //  https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/datetimeoriginal.html#:~:text=The%20format%20is%20%22YYYY%3AMM,blank%20character%20(hex%2020).
 //  extra.DateTimeOriginal = "2023:06:19 15:30:00";
 //  extra.ImageDescription = "Example description";

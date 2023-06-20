@@ -308,12 +308,12 @@ int exif_parse_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes)
 // Should be called before parsing a new stream.
 void exif_clear(exif_info_t* ei);
 
-void exif_from_stream(exif_info_t* ei, exif_stream_t* stream) {
-    exif_parse_from_stream(ei, stream);
+int exif_from_stream(exif_info_t* ei, exif_stream_t* stream) {
+    return exif_parse_from_stream(ei, stream);
 }
 
-void exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t length) {
-    exif_parse_from_memory(ei, data, length);
+int exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t length) {
+    return exif_parse_from_memory(ei, data, length);
 }
 
 static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
@@ -679,6 +679,7 @@ static void exif_parse_ifd_gps(entry_parser_t* p) {
 
 // Locates the JM_APP1 segment and parses it using
 // parseFromEXIFSegment() or parseFromXMPSegment()
+#include "crt.h"
 
 int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
     exif_clear(ei);
@@ -690,16 +691,21 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
     // Scan for JM_APP1 header (bytes 0xFF 0xE1) and parse its length.
     // Exit if both EXIF and XMP sections were parsed.
     uint32_t apps1 = ei->Fields;
-    while ((buf = stream->get(stream, 2)) != null) {
+    for (;;) {
+        buf = stream->get(stream, 2);
+        if (buf == null) { break; }
         // find next marker;
         // in cases of markers appended after the compressed data,
         // optional JM_START fill bytes may precede the marker
-        if (*buf++ != JM_START)
+        if (*buf++ != JM_START) {
             break;
+        }
         uint8_t marker;
-        while ((marker=buf[0]) == JM_START && (buf = stream->get(stream, 1)) != null);
+        while ((marker = buf[0]) == JM_START && (buf = stream->get(stream, 1)) != null);
+//      traceln("marker: 0x%02X", marker);
         // select marker
-        uint16_t sectionLength;
+        uint16_t sectionLength = 0;
+//      traceln("marker: 0x%02X", marker);
         switch (marker) {
             case 0x00:
             case 0x01:
@@ -739,10 +745,14 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                 break;
             default:
                 // skip the section
-                if ((buf=stream->get(stream, 2)) == null ||
-                    (sectionLength = parse16(buf, false)) <= 2 ||
-                    !stream->skip(stream, sectionLength-2))
+                buf = stream->get(stream, 2);
+                if (buf != null) {
+                    sectionLength = parse16(buf, false);
+                }
+//              traceln("marker: 0x%02X section length: %d", marker, sectionLength);
+                if (buf == null || sectionLength <= 2 || !stream->skip(stream, sectionLength - 2)) {
                     return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_INVALID_JPEG;
+                }
         }
     }
     return apps1 & FIELD_ALL ? (int)PARSE_SUCCESS : PARSE_ABSENT_DATA;
@@ -853,9 +863,8 @@ static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, uint32_
     entry_parser_t p = {0};
     p.info = ei;
     p.data = data;
-    p.tiff_header_start = offs;
     p.bytes = bytes;
-    p.offs = offs;
+    p.tiff_header_start = offs;
     p.alignIntel = alignIntel;
     offs += 2;
     if (0x2a != parse16(data + offs, alignIntel))
