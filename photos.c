@@ -314,140 +314,140 @@ static const char* words(const char* fn) {
     return desc;
 }
 
-
 static void process(const char* pathname) {
     total++;
     void* data = null;
     int64_t bytes = 0;
-    fatal_if_not_zero(crt.memmap_read(pathname, &data, &bytes));
+    crt.memmap_read(pathname, &data, &bytes);
     int w = 0, h = 0, c = 0;
-    uint8_t* pixels = stbi_load(pathname, &w, &h, &c, 0);
-    fatal_if_null(pixels);
-    exif_info_t exif = {0};
-    bool has_exif = exif_from_memory(&exif, data, (uint32_t)bytes) == 0;
-    has_exif = has_exif && exif.ImageHeight > 0 && exif.ImageHeight > 0;
-//  traceln("%s %d %dx%d:%d exif: %d", pathname, bytes, w, h, c, has_exif);
-    const char* relative = pathname + strlen(app.argv[1]) + 1;
-    int folder_year = -1;
-    int year = -1;
-    int month = -1;
-    int day = -1;
-    int hour = -1;
-    int minute = -1;
-    int second = -1;
-    if (sscanf(relative, "%d/", &folder_year) != 1) {
-        folder_year = -1;
-        traceln("NO folder_year");
-    } else {
-        if (folder_year < 100) { folder_year += 1900; };
-        yymmdd(relative, folder_year, &year, &month, &day);
-//      traceln("%06d %s %04d %s", total, relative, folder_year, has_exif ? "EXIF" : "");
-    }
-    int exif_year = -1;
-    int exif_month = -1;
-    int exif_day = -1;
-    int exif_hour = -1;
-    int exif_minute = -1;
-    int exif_second = -1;
-    if (strlen(exif.DateTimeOriginal) > 0) {
-        if (sscanf(exif.DateTimeOriginal, "%d:%d:%d %d:%d:%d",
-            &exif_year, &exif_month,  &exif_day,
-            &exif_hour, &exif_minute, &exif_second) != 6) {
-//          traceln("exif.DateTimeOriginal: %s", exif.DateTimeOriginal);
-            exif_year = -1; exif_month = -1; exif_day = -1;
-            exif_hour = -1; exif_minute = -1; exif_second = -1;
+    uint8_t* pixels = data == null ? null : stbi_load(pathname, &w, &h, &c, 0);
+    if (pixels != null) {
+        exif_info_t exif = {0};
+        bool has_exif = exif_from_memory(&exif, data, (uint32_t)bytes) == 0;
+        has_exif = has_exif && exif.ImageHeight > 0 && exif.ImageHeight > 0;
+    //  traceln("%s %d %dx%d:%d exif: %d", pathname, bytes, w, h, c, has_exif);
+        const char* relative = pathname + strlen(app.argv[1]) + 1;
+        int folder_year = -1;
+        int year = -1;
+        int month = -1;
+        int day = -1;
+        int hour = -1;
+        int minute = -1;
+        int second = -1;
+        if (sscanf(relative, "%d/", &folder_year) != 1) {
+            folder_year = -1;
+            traceln("NO folder_year");
+        } else {
+            if (folder_year < 100) { folder_year += 1900; };
+            yymmdd(relative, folder_year, &year, &month, &day);
+    //      traceln("%06d %s %04d %s", total, relative, folder_year, has_exif ? "EXIF" : "");
         }
-    }
-    if (exif_year < 0 && strlen(exif.DateTime) > 0) {
-        if (sscanf(exif.DateTime, "%d:%d:%d %d:%d:%d",
-            &exif_year, &exif_month,  &exif_day,
-            &exif_hour, &exif_minute, &exif_second) != 6) {
-//          traceln("exif.DateTime: %s", exif.DateTime);
-            exif_year = -1; exif_month = -1; exif_day = -1;
-            exif_hour = -1; exif_minute = -1; exif_second = -1;
+        int exif_year = -1;
+        int exif_month = -1;
+        int exif_day = -1;
+        int exif_hour = -1;
+        int exif_minute = -1;
+        int exif_second = -1;
+        if (strlen(exif.DateTimeOriginal) > 0) {
+            if (sscanf(exif.DateTimeOriginal, "%d:%d:%d %d:%d:%d",
+                &exif_year, &exif_month,  &exif_day,
+                &exif_hour, &exif_minute, &exif_second) != 6) {
+    //          traceln("exif.DateTimeOriginal: %s", exif.DateTimeOriginal);
+                exif_year = -1; exif_month = -1; exif_day = -1;
+                exif_hour = -1; exif_minute = -1; exif_second = -1;
+            }
         }
-    }
-    if (exif_year < 0 && strlen(exif.DateTimeDigitized) > 0) {
-        if (sscanf(exif.DateTimeDigitized, "%d:%d:%d %d:%d:%d",
-            &exif_year, &exif_month,  &exif_day,
-            &exif_hour, &exif_minute, &exif_second) != 6) {
-//          traceln("exif.DateTimeDigitized: %s", exif.DateTimeDigitized);
-            exif_year = -1; exif_month = -1; exif_day = -1;
-            exif_hour = -1; exif_minute = -1; exif_second = -1;
+        if (exif_year < 0 && strlen(exif.DateTime) > 0) {
+            if (sscanf(exif.DateTime, "%d:%d:%d %d:%d:%d",
+                &exif_year, &exif_month,  &exif_day,
+                &exif_hour, &exif_minute, &exif_second) != 6) {
+    //          traceln("exif.DateTime: %s", exif.DateTime);
+                exif_year = -1; exif_month = -1; exif_day = -1;
+                exif_hour = -1; exif_minute = -1; exif_second = -1;
+            }
         }
+        if (exif_year < 0 && strlen(exif.DateTimeDigitized) > 0) {
+            if (sscanf(exif.DateTimeDigitized, "%d:%d:%d %d:%d:%d",
+                &exif_year, &exif_month,  &exif_day,
+                &exif_hour, &exif_minute, &exif_second) != 6) {
+    //          traceln("exif.DateTimeDigitized: %s", exif.DateTimeDigitized);
+                exif_year = -1; exif_month = -1; exif_day = -1;
+                exif_hour = -1; exif_minute = -1; exif_second = -1;
+            }
+        }
+        if (exif_year > 1900 && 1 <= exif_month && exif_month <= 12 && exif_day > 0) {
+            year   = exif_year;
+            month  = exif_month;
+            day    = exif_day;
+            hour   = exif_hour;
+            minute = exif_minute;
+            second = exif_second;
+        }
+        if (year < 0) { year = folder_year; }
+        if (month > 12) { month = -1; }
+        if (day   > 31) { day   = -1; }
+        if (strlen(exif.ImageDescription) > 0) {
+    //      traceln("exif.ImageDescription: %s", exif.ImageDescription);
+        }
+        files.mkdirs(output_folder);
+        if (folder_year > 1900 && abs(year - folder_year) > 2) { year = folder_year; }
+        if (year > 1990 && month > 0 && day > 0) {
+            snprintf(output_path, countof(output_path), "%s/img%06d_%04d-%s-%02d_", 
+                output_folder, total, year, months[month], day);
+        } else if (year > 1990 && month > 0) {
+            snprintf(output_path, countof(output_path), "%s/img%06d_%04d-%s_", output_folder, total, year, months[month]);
+        } else if (year > 1990) {
+            snprintf(output_path, countof(output_path), "%s/img%06d_%04d_", output_folder, total, year);
+        } else {
+            snprintf(output_path, countof(output_path), "%s/img%06d_", output_folder, total);
+        }
+        append_pathname(relative);
+        traceln("%s", output_path);
+        jpeg_write(pixels, w, h, c);
+        assert(year > 1900);
+        void*   write_data = writer_context.memory;
+        int32_t write_bytes = writer_context.written;
+        if (has_exif) {
+    //      traceln("TODO: merge exifs?");
+        } else {
+            exif_extra_t extra = {0};
+            int m  =  month  < 1 ?  6 : month;
+            int d  =  day    < 1 ? 15 : day;
+            int hr =  hour   < 1 ? 11 : hour;
+            int mn =  minute < 1 ? 58 : minute;
+            int sc =  second < 1 ? 29  : second;
+            snprintf(extra.DateTimeOriginal, countof(extra.DateTimeOriginal), 
+                "%04d:%02d:%02d %02d:%02d:%02d", 
+                year, m, d, hr, mn, sc);
+            snprintf(extra.ImageDescription, countof(extra.ImageDescription),
+                "%s", 
+                words(output_path + strlen(output_folder) + 1));
+            write_bytes = append_exif_description(writer_context.memory, writer_context.written, 
+                &extra, jpeg_memory, sizeof(jpeg_memory));
+            write_data = jpeg_memory;
+            assert(write_bytes > writer_context.written);
+        }
+        FILE* file = fopen(output_path, "wb");
+        size_t k = fwrite(write_data, 1, write_bytes, file);
+        fatal_if(k != write_bytes);
+        fclose(file);
+        if (!has_exif) {
+            memset(&exif, 0, sizeof(exif));
+            int r = exif_from_memory(&exif, write_data, write_bytes);
+            fatal_if(r != EXIF_PARSE_SUCCESS);
+            assert(exif.ImageDescription[0] != 0);
+            assert(exif.DateTimeOriginal[0] != 0);
+        }
+        change_file_creation_and_write_time(output_path, year, month, day, hour, minute, second);
+    //  https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/datetimeoriginal.html#:~:text=The%20format%20is%20%22YYYY%3AMM,blank%20character%20(hex%2020).
+    //  extra.DateTimeOriginal = "2023:06:19 15:30:00";
+    //  extra.ImageDescription = "Example description";
+    //  https://www.awaresystems.be/imaging/tiff/tifftags/gpsifd.html
+    //  https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/gps/gpslatitude.html
+    //  If latitude is expressed as degrees, minutes and seconds, a typical format would be dd/1,mm/1,ss/1.
+    //  When degrees and minutes are used and, for example, fractions of minutes are given up to two decimal places, the format would be dd/1,mmmm/100,0/1.
+        stbi_image_free(pixels);
     }
-    if (exif_year > 1900 && 1 <= exif_month && exif_month <= 12 && exif_day > 0) {
-        year   = exif_year;
-        month  = exif_month;
-        day    = exif_day;
-        hour   = exif_hour;
-        minute = exif_minute;
-        second = exif_second;
-    }
-    if (year < 0) { year = folder_year; }
-    if (month > 12) { month = -1; }
-    if (day   > 31) { day   = -1; }
-    if (strlen(exif.ImageDescription) > 0) {
-//      traceln("exif.ImageDescription: %s", exif.ImageDescription);
-    }
-    files.mkdirs(output_folder);
-    if (folder_year > 1900 && abs(year - folder_year) > 2) { year = folder_year; }
-    if (year > 1990 && month > 0 && day > 0) {
-        snprintf(output_path, countof(output_path), "%s/img%06d_%04d-%s-%02d_", 
-            output_folder, total, year, months[month], day);
-    } else if (year > 1990 && month > 0) {
-        snprintf(output_path, countof(output_path), "%s/img%06d_%04d-%s_", output_folder, total, year, months[month]);
-    } else if (year > 1990) {
-        snprintf(output_path, countof(output_path), "%s/img%06d_%04d_", output_folder, total, year);
-    } else {
-        snprintf(output_path, countof(output_path), "%s/img%06d_", output_folder, total);
-    }
-    append_pathname(relative);
-    traceln("%s", output_path);
-    jpeg_write(pixels, w, h, c);
-    assert(year > 1900);
-    void*   write_data = writer_context.memory;
-    int32_t write_bytes = writer_context.written;
-    if (has_exif) {
-//      traceln("TODO: merge exifs?");
-    } else {
-        exif_extra_t extra = {0};
-        int m  =  month  < 1 ?  6 : month;
-        int d  =  day    < 1 ? 15 : day;
-        int hr =  hour   < 1 ? 11 : hour;
-        int mn =  minute < 1 ? 58 : minute;
-        int sc =  second < 1 ? 29  : second;
-        snprintf(extra.DateTimeOriginal, countof(extra.DateTimeOriginal), 
-            "%04d:%02d:%02d %02d:%02d:%02d", 
-            year, m, d, hr, mn, sc);
-        snprintf(extra.ImageDescription, countof(extra.ImageDescription),
-            "%s", 
-            words(output_path + strlen(output_folder) + 1));
-        write_bytes = append_exif_description(writer_context.memory, writer_context.written, 
-            &extra, jpeg_memory, sizeof(jpeg_memory));
-        write_data = jpeg_memory;
-        assert(write_bytes > writer_context.written);
-    }
-    FILE* file = fopen(output_path, "wb");
-    size_t k = fwrite(write_data, 1, write_bytes, file);
-    fatal_if(k != write_bytes);
-    fclose(file);
-    if (!has_exif) {
-        memset(&exif, 0, sizeof(exif));
-        int r = exif_from_memory(&exif, write_data, write_bytes);
-        fatal_if(r != PARSE_SUCCESS);
-        assert(exif.ImageDescription[0] != 0);
-        assert(exif.DateTimeOriginal[0] != 0);
-    }
-    change_file_creation_and_write_time(output_path, year, month, day, hour, minute, second);
-//  https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/datetimeoriginal.html#:~:text=The%20format%20is%20%22YYYY%3AMM,blank%20character%20(hex%2020).
-//  extra.DateTimeOriginal = "2023:06:19 15:30:00";
-//  extra.ImageDescription = "Example description";
-//  https://www.awaresystems.be/imaging/tiff/tifftags/gpsifd.html
-//  https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/gps/gpslatitude.html
-//  If latitude is expressed as degrees, minutes and seconds, a typical format would be dd/1,mm/1,ss/1.
-//  When degrees and minutes are used and, for example, fractions of minutes are given up to two decimal places, the format would be dd/1,mmmm/100,0/1.
-    stbi_image_free(pixels);
     crt.memunmap(data, bytes);
 }
 

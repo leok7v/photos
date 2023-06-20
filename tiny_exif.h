@@ -1,3 +1,4 @@
+#pragma once
 /*
   TinyEXIF.h -- A simple ISO C++ library to parse basic EXIF and XMP
                 information from a JPEG file.
@@ -30,30 +31,24 @@
   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-#pragma once
 #include <stdbool.h>
 #include <stdint.h>
-
-#define TINYEXIF_MAJOR_VERSION 1
-#define TINYEXIF_MINOR_VERSION 0
-#define TINYEXIF_PATCH_VERSION 1
 
 #define TINYEXIF_NO_XMP_SUPPORT
 
 enum ErrorCode {
-    PARSE_SUCCESS           = 0, // Parse EXIF and/or XMP was successful
-    PARSE_INVALID_JPEG      = 1, // No JPEG markers found in buffer, possibly invalid JPEG file
-    PARSE_UNKNOWN_BYTEALIGN = 2, // Byte alignment specified in EXIF file was unknown (neither Motorola nor Intel)
-    PARSE_ABSENT_DATA       = 3, // No EXIF and/or XMP data found in JPEG file
-    PARSE_CORRUPT_DATA      = 4, // EXIF and/or XMP header was found, but data was corrupted
+    EXIF_PARSE_SUCCESS           = 0, // Parse EXIF and/or XMP was successful
+    EXIF_PARSE_INVALID_JPEG      = 1, // No JPEG markers found in buffer, possibly invalid JPEG file
+    EXIF_PARSE_UNKNOWN_BYTEALIGN = 2, // Byte alignment specified in EXIF file was unknown (neither Motorola nor Intel)
+    EXIF_PARSE_ABSENT_DATA       = 3, // No EXIF and/or XMP data found in JPEG file
+    EXIF_PARSE_CORRUPT_DATA      = 4, // EXIF and/or XMP header was found, but data was corrupted
 };
 
 enum FieldCode {
-    FIELD_NA                 = 0, // No EXIF or XMP data
-    FIELD_EXIF               = (1 << 0), // EXIF data available
-    FIELD_XMP                = (1 << 1), // XMP data available
-    FIELD_ALL                = FIELD_EXIF|FIELD_XMP
+    EXIF_FIELD_NA                = 0, // No EXIF or XMP data
+    EXIF_FIELD_EXIF              = (1 << 0), // EXIF data available
+    EXIF_FIELD_XMP               = (1 << 1), // XMP data available
+    EXIF_FIELD_ALL               = EXIF_FIELD_EXIF|EXIF_FIELD_XMP
 };
 
 typedef struct exif_stream_s exif_stream_t;
@@ -69,8 +64,11 @@ typedef struct exif_stream_s {
 
 typedef const char* exif_str_t;
 
-typedef struct exif_info_s {
+// DBL_MAX for all absent fields
 
+typedef struct exif_info_s {
+    bool has_app1;
+    bool has_xmp;
     char strings[64 * 1024];        // EXIF UTF-8 string storage
     char* next;                     // next unused EXIF UTF-8 string storage
 
@@ -81,6 +79,7 @@ typedef struct exif_info_s {
     uint32_t RelatedImageWidth;     // Original image width reported in EXIF data
     uint32_t RelatedImageHeight;    // Original image height reported in EXIF data
     exif_str_t ImageDescription;    // Image description
+    exif_str_t UserComment;         // User Comment
     exif_str_t Make;                // Camera manufacturer's name
     exif_str_t Model;               // Camera model
     exif_str_t SerialNumber;        // Serial number of the body of the camera
@@ -262,6 +261,7 @@ typedef struct exif_info_s {
 extern "C" {
 #endif
 
+// return 0 on success
 int exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t bytes);
 int exif_from_stream(exif_info_t* ei, exif_stream_t* stream);
 

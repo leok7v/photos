@@ -15,7 +15,6 @@
   <ItemGroup>
     <ClCompile Include="..\photos.c" />
     <ClCompile Include="..\re.c" />
-    <ClCompile Include="..\exif.c" />
     <ClCompile Include="..\files.c" />
     <ClCompile Include="..\implementation.c" />
     <ClCompile Include="..\tiny_exif.c" />
