@@ -71,14 +71,15 @@ typedef struct exif_info_s {
     bool has_xmp;
     char strings[64 * 1024];        // EXIF UTF-8 string storage
     char* next;                     // next unused EXIF UTF-8 string storage
-
     // Data fields
     uint32_t Fields;                // Store if EXIF and/or XMP data fields are available
+    uint32_t ExifVersion;           // 4 ASCII bytes like "0220" with undefined type
     uint32_t ImageWidth;            // Image width reported in EXIF data
     uint32_t ImageHeight;           // Image height reported in EXIF data
     uint32_t RelatedImageWidth;     // Original image width reported in EXIF data
     uint32_t RelatedImageHeight;    // Original image height reported in EXIF data
     exif_str_t ImageDescription;    // Image description
+    exif_str_t Artist;              // Artist
     exif_str_t UserComment;         // User Comment
     exif_str_t Make;                // Camera manufacturer's name
     exif_str_t Model;               // Camera model
@@ -116,8 +117,31 @@ typedef struct exif_info_s {
                                     // 6: action program
                                     // 7: portrait mode
                                     // 8: landscape mode
+    uint16_t ColorSpace;            // ==1 for sRGB
+    uint16_t SceneType;             // If a DSC recorded the image, this tag value shall 
+                                    // always be set to 1, indicating that the image was 
+                                    // directly photographed.
+    uint16_t ExposureMode;          // 	Indicates the exposure mode set when the image was shot.
+                                    // 0 = Auto exposure
+                                    // 1 = Manual exposure
+                                    // 2 = Auto bracket
+    uint16_t WhiteBalance;          // 0 = Auto white balance
+                                    // 1 = Manual white balance
+    uint16_t CaptureType;           // 0 = Standard
+                                    // 1 = Landscape
+                                    // 2 = Portrait
+                                    // 3 = Night scene
+    uint16_t SensingMethod;         // Indicates the image sensor type on the camera or input device.
+                                    // 1 = Not defined
+                                    // 2 = One-chip color area sensor
+                                    // 3 = Two-chip color area sensor
+                                    // 4 = Three-chip color area sensor
+                                    // 5 = Color sequential area sensor
+                                    // 7 = Trilinear sensor
+                                    // 8 = Color sequential linear sensor
     uint16_t ISOSpeedRatings;       // ISO speed
     double ShutterSpeedValue;       // Shutter speed (reciprocal of exposure time)
+    double MaxAperture;             // Maximu lens aperture
     double ApertureValue;           // The lens aperture
     double BrightnessValue;         // The value of brightness
     double ExposureBiasValue;       // Exposure bias value in EV

@@ -36,15 +36,17 @@
 #include <float.h>
 #include <math.h>
 #include <string.h>
+#include "crt.h"
 
+#ifndef null
 #define null ((void*)0)
-
-#ifdef _MSC_VER
-static int strcasecmp(const char* a, const char* b) {
-    return _stricmp(a, b);
-}
 #endif
 
+#ifdef _MSC_VER
+static int strcasecmp(const char* a, const char* b) { return _stricmp(a, b); }
+#endif
+
+// https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif.html
 /* tags https://github.com/php/php-src/blob/master/ext/exif/exif.c */ 
 #define TAG_GPS_VERSION_ID              0x0000
 #define TAG_GPS_LATITUDE_REF            0x0001
@@ -333,7 +335,7 @@ static bool is_long(entry_parser_t* p) { return p->format == 4; }
 static bool is_rational(entry_parser_t* p) { return p->format == 5 || p->format == 10; }
 static bool is_signed_rational(entry_parser_t* p) { return p->format == 10; }
 static bool is_float(entry_parser_t* p) { return p->format == 11; }
-// static bool IsUndefined(entry_parser_t* p) { return p->format == 7; }
+static bool is_undefined(entry_parser_t* p) { return p->format == 7; }
 
 static uint8_t parse8(const uint8_t* buf) { return buf[0]; }
 
@@ -388,10 +390,12 @@ static exif_str_t parse_string(entry_parser_t* p, const uint8_t* buf,
         p->info->next += num_components + 1;
         char j = intel ? 0 : 24;
         char j_m = intel ? -8 : 8;
-        for (uint32_t i = 0; i<num_components; i++, j -= j_m)
+        for (uint32_t i = 0; i<num_components; i++, j -= j_m) {
             res[i] = (value >> j) & 0xff;
-        if (num_components > 0 && res[num_components - 1] == 0)
+        }
+        if (num_components > 0 && res[num_components - 1] == 0) {
             res[num_components - 1] = 0;
+        }
     } else if (base + value + num_components <= count) {
         const char* const s = (const char*)buf + base + value;
         uint32_t num = 0;
@@ -477,6 +481,144 @@ static bool parser_fetch_float_as_doble(entry_parser_t* p, double* val) {
         return false;
     *val = _val;
     return true;
+}
+
+static int parse_xmp_xml(const char* xml, uint32_t len) {
+    (void)xml; (void)len; // TODO: remove when xml is implemented
+    traceln("%.*s", len, xml);
+	// Skip xpacket end section so that tinyxml2 lib parses the section correctly.
+#ifndef TINYEXIF_NO_XMP_SUPPORT
+	const char* szEnd = Tools::strrnstr(xml, "<?xpacket end=", len);
+	if (szEnd != NULL)
+		len = (uint32_t)(szEnd - xml);
+
+	// Try parsing the XML packet.
+	tinyxml2::XMLDocument doc;
+	const tinyxml2::XMLElement* document;
+	if (doc.Parse(xml, len) != tinyxml2::XML_SUCCESS ||
+		((document=doc.FirstChildElement("x:xmpmeta")) == NULL && (document=doc.FirstChildElement("xmp:xmpmeta")) == NULL) ||
+		(document=document->FirstChildElement("rdf:RDF")) == NULL ||
+		(document=document->FirstChildElement("rdf:Description")) == NULL)
+		return PARSE_ABSENT_DATA;
+
+	// Try parsing the XMP content for tiff details.
+	if (Orientation == 0) {
+		uint32_t _Orientation(0);
+		document->QueryUnsignedAttribute("tiff:Orientation", &_Orientation);
+		Orientation = (uint16_t)_Orientation;
+	}
+	if (ImageWidth == 0 && ImageHeight == 0) {
+		document->QueryUnsignedAttribute("tiff:ImageWidth", &ImageWidth);
+		if (document->QueryUnsignedAttribute("tiff:ImageHeight", &ImageHeight) != tinyxml2::XML_SUCCESS)
+			document->QueryUnsignedAttribute("tiff:ImageLength", &ImageHeight) ;
+	}
+	if (XResolution == 0 && YResolution == 0 && ResolutionUnit == 0) {
+		document->QueryDoubleAttribute("tiff:XResolution", &XResolution);
+		document->QueryDoubleAttribute("tiff:YResolution", &YResolution);
+		uint32_t _ResolutionUnit(0);
+		document->QueryUnsignedAttribute("tiff:ResolutionUnit", &_ResolutionUnit);
+		ResolutionUnit = (uint16_t)_ResolutionUnit;
+	}
+	// Try parsing the XMP content for projection type.
+	{
+	    const tinyxml2::XMLElement* const element(document->FirstChildElement("GPano:ProjectionType"));
+	    if (element != NULL) {
+		    const char* const szProjectionType(element->GetText());
+		    if (szProjectionType != NULL) {
+			    if (0 == strcasecmp(szProjectionType, "perspective"))
+				    ProjectionType = 1;
+			    else
+			    if (0 == strcasecmp(szProjectionType, "equirectangular") ||
+				    0 == strcasecmp(szProjectionType, "spherical"))
+				    ProjectionType = 2;
+		    }
+	    }
+	}
+	// Try parsing the XMP content for supported maker's info.
+	struct ParseXMP	{
+		// try yo fetch the value both from the attribute and child element
+		// and parse if needed rational numbers stored as string fraction
+		static bool Value(const tinyxml2::XMLElement* document, const char* name, double& value) {
+			const char* szAttribute = document->Attribute(name);
+			if (szAttribute == NULL) {
+				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
+				if (element == NULL || (szAttribute=element->GetText()) == NULL)
+					return false;
+			}
+			std::vector<std::string> values;
+			Tools::strSplit(szAttribute, '/', values);
+			switch (values.size()) {
+			case 1: value = strtod(values.front().c_str(), NULL); return true;
+			case 2: value = strtod(values.front().c_str(), NULL)/strtod(values.back().c_str(), NULL); return true;
+			}
+			return false;
+		}
+		// same as previous function but with unsigned int results
+		static bool Value(const tinyxml2::XMLElement* document, const char* name, uint32_t& value) {
+			const char* szAttribute = document->Attribute(name);
+			if (szAttribute == NULL) {
+				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
+				if (element == NULL || (szAttribute = element->GetText()) == NULL)
+					return false;
+			}
+			value = strtoul(szAttribute, NULL, 0); return true;
+			return false;
+		}
+	};
+	const char* szAbout(document->Attribute("rdf:about"));
+	if (0 == strcasecmp(Make.c_str(), "DJI") || (szAbout != NULL && 0 == strcasecmp(szAbout, "DJI Meta Data"))) {
+		ParseXMP::Value(document, "drone-dji:AbsoluteAltitude", GeoLocation.Altitude);
+		ParseXMP::Value(document, "drone-dji:RelativeAltitude", GeoLocation.RelativeAltitude);
+		ParseXMP::Value(document, "drone-dji:GimbalRollDegree", GeoLocation.RollDegree);
+		ParseXMP::Value(document, "drone-dji:GimbalPitchDegree", GeoLocation.PitchDegree);
+		ParseXMP::Value(document, "drone-dji:GimbalYawDegree", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "drone-dji:CalibratedFocalLength", Calibration.FocalLength);
+		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterX", Calibration.OpticalCenterX);
+		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterY", Calibration.OpticalCenterY);
+	} else if (0 == strcasecmp(Make.c_str(), "senseFly") || 0 == strcasecmp(Make.c_str(), "Sentera")) {
+		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree);
+		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree)) {
+			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
+			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
+		}
+		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "Camera:GPSXYAccuracy", GeoLocation.AccuracyXY);
+		ParseXMP::Value(document, "Camera:GPSZAccuracy", GeoLocation.AccuracyZ);
+	} else if (0 == strcasecmp(Make.c_str(), "PARROT")) {
+		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree) ||
+		ParseXMP::Value(document, "drone-parrot:CameraRollDegree", GeoLocation.RollDegree);
+		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree) ||
+			ParseXMP::Value(document, "drone-parrot:CameraPitchDegree", GeoLocation.PitchDegree)) {
+			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
+			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
+		}
+		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree) ||
+		ParseXMP::Value(document, "drone-parrot:CameraYawDegree", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "Camera:AboveGroundAltitude", GeoLocation.RelativeAltitude);
+	}
+	ParseXMP::Value(document, "GPano:PosePitchDegrees", GPano.PosePitchDegrees);
+	ParseXMP::Value(document, "GPano:PoseRollDegrees", GPano.PoseRollDegrees);
+	// parse GCamera:MicroVideo
+	if (document->Attribute("GCamera:MicroVideo")) {
+		ParseXMP::Value(document, "GCamera:MicroVideo", MicroVideo.HasMicroVideo);
+		ParseXMP::Value(document, "GCamera:MicroVideoVersion", MicroVideo.MicroVideoVersion);
+		ParseXMP::Value(document, "GCamera:MicroVideoOffset", MicroVideo.MicroVideoOffset);
+	}
+#endif
+	return EXIF_PARSE_SUCCESS;
+}
+
+static int parse_xmp(const char* buf, unsigned len) {
+	unsigned offs = 29; // current offset into buffer
+	if (!buf || len < offs) {
+		return EXIF_PARSE_ABSENT_DATA;
+    } else if (strncmp(buf, "http://ns.adobe.com/xap/1.0/\0", offs) != 0) {
+		return EXIF_PARSE_ABSENT_DATA;
+    } else if (offs >= len) {
+		return EXIF_PARSE_CORRUPT_DATA;
+    } else {
+    	return parse_xmp_xml(buf + offs, len - offs);
+    }
 }
 
 // Parse tag as MakerNote IFD
@@ -602,14 +744,13 @@ static void exif_parse_ifd(entry_parser_t* p) {
     switch (p->tag) {
         case 0x02bc:
             p->info->has_xmp = true;
-            #ifndef TINYEXIF_NO_XMP_SUPPORT
+            traceln("TODO: XMP?");
     		// XMP Metadata (Adobe technote 9-14-02)
-		    if (parser.IsUndefined()) {
-			    exif_str_t xml = parser_fetch_str(p);
-			    parseFromXMPSegmentXML(xml, (uint32_t)strlen(xml));
+		    if (is_undefined(p)) {
+			    exif_str_t xml = null;
+                parser_fetch_str(p, &xml);
+			    parse_xmp_xml(xml, (uint32_t)strlen(xml));
 		    }
-            #endif // TINYEXIF_NO_XMP_SUPPORT
-            // TODO: XMP?
             break;
         case TAG_EXPOSURETIME: // Exposure time in seconds
             parser_fetch_double(p, &p->info->ExposureTime);
@@ -736,6 +877,35 @@ static void exif_parse_ifd(entry_parser_t* p) {
             // Lens model.
             parser_fetch_str(p, &p->info->LensInfo.Model);
             break;
+        case TAG_ARTIST:
+            parser_fetch_str(p, &p->info->Artist);
+            break;
+        case TAG_EXIFVERSION:
+            parser_fetch32(p, &p->info->ExifVersion);
+            break;
+        case TAG_MAX_APERTURE:
+            parser_fetch_double(p, &p->info->MaxAperture);
+            break;
+        case TAG_COLOR_SPACE:
+            parser_fetch16(p, &p->info->ColorSpace);
+            break;
+        case TAG_SENSING_METHOD: // short
+            parser_fetch16(p, &p->info->SensingMethod);
+            break;
+        case TAG_SCENE_TYPE:
+            parser_fetch16(p, &p->info->SceneType);
+            break;
+        case TAG_EXPOSURE_MODE:
+            parser_fetch16(p, &p->info->ExposureMode);
+            break;
+        case TAG_WHITE_BALANCE:
+            parser_fetch16(p, &p->info->WhiteBalance);
+            break;
+        case TAG_SCENE_CAPTURE_TYPE:
+            parser_fetch16(p, &p->info->CaptureType);
+            break;
+        default:
+            traceln("skip: 0x%04X", p->tag);
     }
 }
 
@@ -1064,10 +1234,9 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
         }
         uint8_t marker;
         while ((marker = buf[0]) == JM_START && (buf = stream->get(stream, 1)) != null);
-//      traceln("marker: 0x%02X", marker);
         // select marker
-        uint16_t sectionLength = 0;
-//      traceln("marker: 0x%02X", marker);
+        uint16_t section_bytes = 0;
+        bool ignored = false;
         switch (marker) {
             case 0x00:
             case 0x01:
@@ -1090,14 +1259,27 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                 if (buf == null) {
                     return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : EXIF_PARSE_INVALID_JPEG;
                 }
-                sectionLength = parse16(buf, false);
-                if (sectionLength <= 2 || (buf=stream->get(stream, sectionLength-=2)) == null)
+                section_bytes = parse16(buf, false);
+                if (section_bytes <= 2 || (buf=stream->get(stream, section_bytes-=2)) == null)
                     return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : EXIF_PARSE_INVALID_JPEG;
                 ei->has_app1 = true;
-                int ret = exif_parse_from_segment(ei, buf, sectionLength);
+                int ret = exif_parse_from_segment(ei, buf, section_bytes);
                 switch (ret) {
                     case EXIF_PARSE_ABSENT_DATA:
-                        // TODO: XMP
+                        traceln("TODO: XMP");
+                        ret =parse_xmp((const char*)buf, section_bytes);
+				        switch (ret) {
+				            case EXIF_PARSE_ABSENT_DATA:
+					            break;
+				            case EXIF_PARSE_SUCCESS:
+                                apps1 |= EXIF_FIELD_XMP;
+					            if (apps1 == EXIF_FIELD_ALL) {
+						            return EXIF_PARSE_SUCCESS;
+                                }
+					            break;
+				            default:
+					            return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : ret;
+				        }
                         break;
                     case EXIF_PARSE_SUCCESS:
                         if ((apps1 |= EXIF_FIELD_EXIF) == EXIF_FIELD_ALL) {
@@ -1108,14 +1290,20 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                         return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : ret;
                 }
                 break;
+            case JM_APP14:
+            case JM_APP13: // IPCT   
+            case JM_SOF0:
+            case JM_DHT:
+            case JM_DQT:
+            case JM_DRI:
+                ignored = true; // and fall down to default:
             default:
+                if (!ignored) { traceln("unhandled: 0x%02X", marker); }
                 // skip the section
                 buf = stream->get(stream, 2);
-                if (buf != null) {
-                    sectionLength = parse16(buf, false);
-                }
-//              traceln("marker: 0x%02X section length: %d", marker, sectionLength);
-                if (buf == null || sectionLength <= 2 || !stream->skip(stream, sectionLength - 2)) {
+                section_bytes = buf != null ? parse16(buf, false) : 0;
+//              traceln("marker: 0x%02X section length: %d", marker, section_bytes);
+                if (buf == null || section_bytes <= 2 || !stream->skip(stream, section_bytes - 2)) {
                     return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : EXIF_PARSE_INVALID_JPEG;
                 }
         }

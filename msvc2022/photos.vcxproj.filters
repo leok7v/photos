@@ -30,6 +30,9 @@
     <ClCompile Include="..\tiny_exif.c">
       <Filter>runtime</Filter>
     </ClCompile>
+    <ClCompile Include="..\yxml.c">
+      <Filter>runtime</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\re.h">
@@ -57,6 +60,9 @@
       <Filter>runtime</Filter>
     </ClInclude>
     <ClInclude Include="..\version.h" />
+    <ClInclude Include="..\yxml.h">
+      <Filter>runtime</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\photos.ico">
