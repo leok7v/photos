@@ -98,16 +98,18 @@ typedef struct exif_info_s {
                                     //    a non-square aspect ratio, but no meaningful absolute dimensions
                                     // 2: inch
                                     // 3: centimeter
-    uint16_t BitsPerSample;         // Number of bits per component
+    uint16_t   BitsPerSample;       // Number of bits per component
     exif_str_t Software;            // Software used
     exif_str_t DateTime;            // File change date and time
     exif_str_t DateTimeOriginal;    // Original file date and time (may not be present)
     exif_str_t DateTimeDigitized;   // Digitization date and time (may not be present)
     exif_str_t SubSecTimeOriginal;  // Sub-second time that original picture was taken
     exif_str_t Copyright;           // File copyright information
-    double ExposureTime;            // Exposure time in seconds
-    double FNumber;                 // F/stop
-    uint16_t ExposureProgram;       // Exposure program
+    exif_str_t OffsetTimeOriginal;  // "+00:00" (~timezone)
+    uint32_t   FlashPixVersion;     // undefined type 4 bytes, The Flashpix format version supported by a FPXR file
+    double     ExposureTime;        // Exposure time in seconds
+    double     FNumber;             // F/stop
+    uint16_t   ExposureProgram;     // Exposure program
                                     // 0: not defined
                                     // 1: manual
                                     // 2: normal program
@@ -131,6 +133,15 @@ typedef struct exif_info_s {
                                     // 1 = Landscape
                                     // 2 = Portrait
                                     // 3 = Night scene
+    uint16_t ComponentConfig;       // 0 = -
+                                    // 1 = Y
+                                    // 2 = Cb
+                                    // 3 = Cr	  	
+                                    // 4 = R
+                                    // 5 = G
+                                    // 6 = B
+    uint16_t YCCPositioning;        // Specifies the positioning of subsampled chrominance 
+                                    // components relative to luminance samples.
     uint16_t SensingMethod;         // Indicates the image sensor type on the camera or input device.
                                     // 1 = Not defined
                                     // 2 = One-chip color area sensor

@@ -348,7 +348,7 @@ static void process(const char* pathname) {
         int exif_hour = -1;
         int exif_minute = -1;
         int exif_second = -1;
-        if (strlen(exif.DateTimeOriginal) > 0) {
+        if (exif.DateTimeOriginal != null && strlen(exif.DateTimeOriginal) > 0) {
             if (sscanf(exif.DateTimeOriginal, "%d:%d:%d %d:%d:%d",
                 &exif_year, &exif_month,  &exif_day,
                 &exif_hour, &exif_minute, &exif_second) != 6) {
@@ -357,7 +357,7 @@ static void process(const char* pathname) {
                 exif_hour = -1; exif_minute = -1; exif_second = -1;
             }
         }
-        if (exif_year < 0 && strlen(exif.DateTime) > 0) {
+        if (exif_year < 0 && exif.DateTime != null  && strlen(exif.DateTime) > 0) {
             if (sscanf(exif.DateTime, "%d:%d:%d %d:%d:%d",
                 &exif_year, &exif_month,  &exif_day,
                 &exif_hour, &exif_minute, &exif_second) != 6) {
@@ -366,7 +366,7 @@ static void process(const char* pathname) {
                 exif_hour = -1; exif_minute = -1; exif_second = -1;
             }
         }
-        if (exif_year < 0 && strlen(exif.DateTimeDigitized) > 0) {
+        if (exif_year < 0 && exif.DateTimeDigitized != null && strlen(exif.DateTimeDigitized) > 0) {
             if (sscanf(exif.DateTimeDigitized, "%d:%d:%d %d:%d:%d",
                 &exif_year, &exif_month,  &exif_day,
                 &exif_hour, &exif_minute, &exif_second) != 6) {
@@ -386,8 +386,8 @@ static void process(const char* pathname) {
         if (year < 0) { year = folder_year; }
         if (month > 12) { month = -1; }
         if (day   > 31) { day   = -1; }
-        if (strlen(exif.ImageDescription) > 0) {
-    //      traceln("exif.ImageDescription: %s", exif.ImageDescription);
+        if (exif.ImageDescription != null && strlen(exif.ImageDescription) > 0) {
+            traceln("exif.ImageDescription: %s", exif.ImageDescription);
         }
         files.mkdirs(output_folder);
         if (folder_year > 1900 && abs(year - folder_year) > 2) { year = folder_year; }
@@ -487,7 +487,6 @@ static void test_exif(const char* pathname) {
     crt.memunmap(data, bytes);
 }
 
-
 #include "yxml.h"
 #include <inttypes.h>
 
@@ -496,40 +495,156 @@ typedef struct xml_npv_s {
     const char**v;
     int32_t up; // for nested tags e.g.: 
     // <dc:creator><rdf:Seq><rdf:li>name</rdf:li></rdf:Seq></dc:creator>
+    // <rdf:Alt><rdf:li>...</rdf:li></rdf:Alt>
+    // <rdf:Bag><rdf:li>...</rdf:li></rdf:Bag>
     int32_t append; // for appending lists like:
     // <dc:subject><rdf:Bag>
     //    <rdf:li>keyword1</rdf:li><rdf:li>keyword2</rdf:li>...
     // </rdf:Bag></dc:subject>
+    const char* p; // parent for disambiguation 
 } xml_npv_t;
+
+// https://stackoverflow.com/questions/29001433/how-rdfbag-rdfseq-and-rdfalt-is-different-while-using-them
+
+// xml_rdf_t represents rdf:Bag rdf:Seq and rdf:Alt
+// interpretation is left to the client.
+// UTF-8 "\x00\x00" terminated list of "\x00" terminated strings
+
+typedef const char* xml_rdf_t; 
+typedef const char* xml_str_t; 
 
 typedef struct xml_context_s {
     yxml_t yxml;
     struct {
         struct {
-            const char* CountryCode;
+            xml_str_t CountryCode;
             struct {
-                const char* CiAdrCity;
-                const char* CiAdrCtry;
-                const char* CiAdrExtadr;
-                const char* CiAdrPcode;
-                const char* CiAdrRegion;
-                const char* CiEmailWork;
-                const char* CiTelWork;
-                const char* CiUrlWork;
+                xml_str_t CiAdrCity;
+                xml_str_t CiAdrCtry;
+                xml_str_t CiAdrExtadr;
+                xml_str_t CiAdrPcode;
+                xml_str_t CiAdrRegion;
+                xml_str_t CiEmailWork;
+                xml_str_t CiTelWork;
+                xml_str_t CiUrlWork;
             } CreatorContactInfo;
-            const char* IntellectualGenre;
-            const char* Location;
-            const char* Scene;
-            const char* SubjectCode;
+            xml_str_t IntellectualGenre;
+            xml_str_t Location;
+            xml_str_t Scene;
+            xml_str_t SubjectCode;
         } Iptc4xmpCore;
         struct {
-            const char* creator;
-            const char* date; // "2017-05-29T17:19:21-0400"
-            const char* description;
-            const char* title;
-            const char* subject; // keywords
+            // see: https://github.com/Exiv2/exiv2/issues/1959 for the problems
+            // https://www.iptc.org/std/photometadata/examples/
+            // with ArtworkOrObject disambiguations...
+            xml_str_t AOCopyrightNotice;
+            xml_rdf_t AOCreator;      
+            xml_str_t AODateCreated;  // "2017-05-29T17:19:21-0400"
+            xml_str_t AddlModelInfo;
+            struct {
+                xml_str_t AOCircaDateCreated;
+                xml_rdf_t AOContentDescription;       
+                xml_rdf_t AOContributionDescription;  
+                xml_str_t AOCopyrightNotice; 
+                xml_rdf_t AOCreator;                  
+                xml_rdf_t AOCreatorId;                
+                xml_str_t AOCurrentCopyrightOwnerId;
+                xml_str_t AOCurrentCopyrightOwnerName;
+                xml_str_t AOCurrentLicensorId;
+                xml_str_t AOCurrentLicensorName;
+                xml_rdf_t AOPhysicalDescription;      
+                xml_str_t AOSource;
+                xml_str_t AOSourceInvNo;
+                xml_str_t AOSourceInvURL;
+                xml_rdf_t AOStylePeriod;              
+                xml_rdf_t AOTitle;                    
+            } ArtworkOrObject;
+            xml_str_t DigImageGUID;
+            xml_rdf_t EmbdEncRightsExpr;
+            xml_str_t DigitalSourceType;
+            xml_rdf_t Event;                          
+            xml_rdf_t EventId;                          
+            struct { // TODO: this is actually bag of triplets
+                xml_str_t LinkedRightsExpr; 
+                xml_str_t RightsExprEncType;
+                xml_str_t RightsExprLangId;
+            } LinkedEncRightsExpr;
+            struct {
+                xml_str_t City;
+                xml_str_t CountryCode;
+                xml_str_t CountryName;
+                xml_str_t ProvinceState;
+                xml_str_t Sublocation;
+                xml_str_t WorldRegion;
+            } LocationCreated;
+            struct {
+                xml_str_t City;
+                xml_str_t CountryCode;
+                xml_str_t CountryName;
+                xml_str_t ProvinceState;
+                xml_str_t Sublocation;
+                xml_str_t WorldRegion;
+            } LocationShown;
+            xml_str_t MaxAvailHeight;
+            xml_str_t MaxAvailWidth;
+            xml_rdf_t ModelAge;               
+            xml_rdf_t OrganisationInImageCode;
+            xml_rdf_t OrganisationInImageName;
+            xml_rdf_t PersonInImage; 
+            xml_rdf_t PersonCharacteristic;
+            xml_rdf_t PersonDescription;
+            struct { // TODO: should be PersonInImageDetails[count]
+                xml_rdf_t PersonCharacteristic;
+                xml_rdf_t PersonDescription;
+                xml_rdf_t PersonId;
+                xml_rdf_t PersonName;
+            } PersonInImageWDetails;
+            struct { // TODO: should be PersonInImageDetails[count]
+                xml_rdf_t ProductDescription;
+                xml_str_t ProductGTIN;
+                xml_str_t ProductId;
+                xml_rdf_t ProductName;
+            } ProductInImage;
+            struct {
+                xml_str_t RegItemId;
+                xml_str_t RegOrgId;
+            } RegistryId;
+            struct {
+                xml_str_t CvId;
+                xml_str_t CvTermId;
+                xml_rdf_t CvTermName; 
+                xml_str_t CvTermRefinedAbout;
+            } AboutCvTerm;
+        } Iptc4xmpExt;
+        struct {
+            xml_str_t creator;
+            xml_str_t date;   // "2017-05-29T17:19:21-0400"
+            xml_str_t format; // "image/jpeg"
+            xml_str_t description;
+            xml_str_t rights;
+            xml_rdf_t title;
+            xml_rdf_t subject;
         } dc;
-    } data;
+        struct {
+            xml_str_t GPSAltitude;    // "0/10"
+            xml_str_t GPSAltitudeRef; // "0"
+            xml_str_t GPSLatitude;    // "26,34.951N"
+            xml_str_t GPSLongitude;   // "80,12.014W"
+        } exif;
+//      struct {                      // TODO: complicated
+//          int32_n count;
+//          struct {
+//              xml_rdf_t Name;
+//              xml_rdf_t Role;
+//          } contributors;
+//      } Contributor;
+        xml_str_t CreateDate;
+        xml_str_t CreatorTool;
+        xml_str_t MetadataDate;
+        xml_str_t ModifyDate;
+        xml_str_t Rating;
+        xml_str_t Lens; // <aux:Lens>Samsung Galaxy S7 Rear Camera</aux:Lens>
+    } xmp;
     char* stack[64]; // element names stack
     int32_t top;
     char* strings;
@@ -538,136 +653,122 @@ typedef struct xml_context_s {
     xml_npv_t* npv;
     int32_t npv_count;
     int32_t index;
-    int32_t indata;
-    int32_t nextdata;
 } xml_context_t;
 
-static int verbose = 0;
-
-static void y_printchar(char c) {
-	if (c == '\x7F' || (c >= 0 && c < 0x20)) {
-		printf("\\x%02x", c);
-	} else {
-		printf("%c", c);
-    }
+static const char* yxml_parent(xml_context_t* ctx, int up) {
+    int sp = ctx->top - 1 - up;
+    return sp >= 0 ? ctx->stack[sp] : "";
 }
 
-
-static void y_printstring(const char *s) {
-//  traceln("%s", s);
-	while (*s) { y_printchar(*s); s++; }
+static inline bool yxml_strequ(const char* s0, const char* s1) {
+    uint32_t l0 = (uint32_t)strlen(s0);
+    uint32_t l1 = (uint32_t)strlen(s1);
+    return l0 == l1 && memcmp(s0, s1, l0) == 0;
 }
 
-static void y_printtoken(yxml_t *x, const char *str) {
-	puts("");
-	if (verbose) {
-		printf("t%03"PRIu64" l%03"PRIu32" b%03"PRIu64": ", x->total, x->line, x->byte);
-    }
-	printf("%s", str);
-}
-
-
-static void y_printres(yxml_t* x, yxml_ret_t r) {
+static void yxml_element_start(yxml_t* x) {
     xml_context_t* ctx = (xml_context_t*)x;
+	assert(yxml_symlen(x, x->elem) == strlen(x->elem));
+    fatal_if(ctx->top >= countof(ctx->stack));
+    ctx->stack[ctx->top++] = x->elem;
+    for (int i = 0; i < ctx->npv_count && ctx->index < 0; i++) {
+        // if .up == 0 both up and top are the same and are top
+        //             element of the stack
+        // if .up > 0  up could be empty "" or parent/grandparent
+        //             of element
+        // In XMP spec the elements may have rdf:containers as content
+        //             but in the field broken writters may write single
+        //             item container as direct content.
+        const char* up  = yxml_parent(ctx, ctx->npv[i].up);
+        const char* top = yxml_parent(ctx, 0);
+        const char* name = ctx->npv[i].n;
+        if (yxml_strequ(up, name) || yxml_strequ(top, name)) {
+            const char* parent = ctx->npv[i].p;
+            bool has_parent = parent == null; // parent was not required
+            for (int p = ctx->top - 2; p >= 0 && !has_parent; p--) {
+                has_parent = yxml_strequ(ctx->stack[p], parent);
+            }
+            if (has_parent) {
+                assert(ctx->index < 0, "content nesting not supported");
+                if (!ctx->npv[i].append || *ctx->npv[i].v == null || *ctx->npv[i].v[0] == 0) {
+                    ctx->next++; // extra zero byte after zero separated appended rdf:li
+                    *ctx->npv[i].v = ctx->next;
+                } else { // appended values "\x00" separated:
+                    fatal_if(ctx->next + 3 >= ctx->end);
+                    memcpy(ctx->next, "\x00\x00", 2); // including terminating double zero 
+                    ctx->next++; // only advance first "\x00" byte 
+                }
+                ctx->index = i;
+//              if (strstr(top, "EventId") != null) { crt.breakpoint(); }
+            }
+        }
+    }
+}
+
+static void yxml_content(yxml_t* x) {
+    xml_context_t* ctx = (xml_context_t*)x;
+    if (ctx->index >= 0) {
+        char* p = ctx->yxml.data;
+        if (ctx->next[0] == 0) { // skip starting white space bytes
+            while (isspace(*(uint8_t*)p)) { p++; }
+        }
+        const int64_t k = strlen((char*)p);
+        fatal_if(ctx->next + k + 1 >= ctx->end);
+        memcpy(ctx->next, p, k + 1); // including terminating zero byte
+        ctx->next += k;
+    }
+}
+
+static void yxml_element_end(yxml_t* x) {
+    xml_context_t* ctx = (xml_context_t*)x;
+    assert(ctx->top > 0);
+    const int i = ctx->index;
+    if (i >= 0) {
+        const char* top = yxml_parent(ctx, 0);
+//      if (strstr(top, "EventId") != null) { crt.breakpoint(); }
+        const char* name = ctx->npv[i].n;
+        if (yxml_strequ(top, name)) {
+            ctx->index = -1;
+        }
+        ctx->next++; // double zero byte termination
+    }
+    ctx->top--;
+}
+
+static void yxml_xmp(yxml_t* x, yxml_ret_t r) {
 	switch(r) {
-	    case YXML_OK:
-		    if (verbose) {
-			    y_printtoken(x, "ok");
-			    ctx->nextdata = 0;
-		    } else {
-			    ctx->nextdata = ctx->indata;
-            }
-		    break;
-	    case YXML_ELEMSTART:
-		    y_printtoken(x, "elemstart ");
-		    y_printstring(x->elem);
-		    if (yxml_symlen(x, x->elem) != strlen(x->elem)) {
-			    y_printtoken(x, "assertfail: elem lengths don't match");
-            }
-		    if (r & YXML_CONTENT) {
-			    y_printtoken(x, "content");
-            }
-            fatal_if(ctx->top >= countof(ctx->stack));
-            ctx->stack[ctx->top++] = x->elem;
-            for (int i = 0; i < ctx->npv_count; i++) {
-                int sp = ctx->top - 1 - ctx->npv[i].up;
-                if (sp >= 0) {
-                    const char* e = ctx->stack[sp];
-                    const int64_t n = strlen(ctx->npv[i].n);
-                    const int64_t k = strlen(e);
-                    if (n == k && memcmp(ctx->npv[i].n, e, n) == 0) {
-                        ctx->index = i;
-                        if (!ctx->npv[i].append || *ctx->npv[i].v == null || *ctx->npv[i].v[0] == 0) {
-                            *ctx->npv[i].v = ctx->next;
-                        } else { // appended values coma separated:
-                            fatal_if(ctx->next + 3 >= ctx->end);
-                            memcpy(ctx->next, ",\x20", 3); // including terminating zero byte
-                            ctx->next += 2;
-                        }
-                        traceln("name: %s", ctx->npv[i].n);
-                        break;
-                    }
-                }
-            }
-		    break;
-	    case YXML_CONTENT:
-            if (ctx->index >= 0) {
-                const int64_t k = strlen(x->data);
-                fatal_if(ctx->next + k >= ctx->end);
-                memcpy(ctx->next, x->data, k + 1); // including terminating zero byte
-                ctx->next += k;
-            }
-		    break;
-	    case YXML_ELEMEND:
-            assert(ctx->top > 0);
-            if (ctx->index >= 0) {
-                int sp = ctx->top - 1 - ctx->npv[ctx->index].up;
-                if (sp >= 0) {
-                    const char* e = ctx->stack[sp];
-                    const int64_t k = strlen(e);
-                    const int64_t n = strlen(ctx->npv[ctx->index].n);
-                    if (n == k && strncmp(e, ctx->npv[ctx->index].n, n) == 0) {
-                        traceln("value: %s", *ctx->npv[ctx->index].v);
-                        ctx->index = -1;
-                    }
-                }
-            }
-            assert(ctx->top > 0);
-            ctx->top--;
-		    y_printtoken(x, "elemend");
-		    break;
+	    case YXML_ELEMSTART: yxml_element_start(x); break;
+	    case YXML_CONTENT  : yxml_content(x);       break;
+	    case YXML_ELEMEND  : yxml_element_end(x);   break;
+        // ignored:
 	    case YXML_ATTRSTART:
-		    y_printtoken(x, "attrstart ");
-		    y_printstring(x->attr);
-		    if(yxml_symlen(x, x->attr) != strlen(x->attr)) {
-			    y_printtoken(x, "assertfail: attr lengths don't match");
-            }
-		    break;
 	    case YXML_ATTREND:
-		    y_printtoken(x, "attrend");
-		    break;
 	    case YXML_PICONTENT:
 	    case YXML_ATTRVAL:
-		    if (!ctx->indata) {
-			    y_printtoken(x, r == YXML_CONTENT ? "content " : r == YXML_PICONTENT ? "picontent " : "attrval ");
-            }
-		    y_printstring(x->data);
-		    ctx->nextdata = 1;
-		    break;
 	    case YXML_PISTART:
-		    y_printtoken(x, "pistart ");
-		    y_printstring(x->pi);
-		    if(yxml_symlen(x, x->pi) != strlen(x->pi))
-			    y_printtoken(x, "assertfail: pi lengths don't match");
-		    break;
 	    case YXML_PIEND:
-		    y_printtoken(x, "piend");
+	    case YXML_OK:
 		    break;
 	    default:
-		    y_printtoken(x, "error\n");
-		    exit(0);
+		    assert(false, "r: %d", r);
 	}
-	ctx->indata = ctx->nextdata;
+}
+
+static const char* rdf2str(const char* rdf) {
+    static char append[1024];
+    char* p = append;
+    *p = 0;
+    while (*rdf != 0) {
+        char* s = (char*)rdf;
+        const int64_t k = strlen(s);
+        if (p == append) {
+            p += snprintf(p, append + sizeof(append) - p, "%s", s);
+        } else {
+            p += snprintf(p, append + sizeof(append) - p, "<|>%s", s);
+        }
+        rdf += k + 1;
+    }
+    return append;
 }
 
 static void test_xml() {
@@ -679,44 +780,278 @@ static void test_xml() {
     context.strings = strings;
     context.next    = strings;
     context.end     = strings + sizeof(strings);
+    // nvp O(n^2) not a performance champion. Can be optimized using hashmaps
     xml_npv_t npv[] = {
-        { "Iptc4xmpCore:CountryCode", &context.data.Iptc4xmpCore.CountryCode },
+        { "Iptc4xmpCore:CiAdrCity"  , &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrCity  },
+        { "Iptc4xmpCore:CiAdrCtry"  , &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrCtry  },
+        { "Iptc4xmpCore:CiAdrExtadr", &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrExtadr},
+        { "Iptc4xmpCore:CiAdrPcode" , &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrPcode },
+        { "Iptc4xmpCore:CiAdrRegion", &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrRegion},
+        { "Iptc4xmpCore:CiEmailWork", &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiEmailWork},
+        { "Iptc4xmpCore:CiTelWork"  , &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiTelWork  },
+        { "Iptc4xmpCore:CiUrlWork"  , &context.xmp.Iptc4xmpCore.CreatorContactInfo.CiUrlWork  },
   
-        { "Iptc4xmpCore:CiAdrCity"  , &context.data.Iptc4xmpCore.CreatorContactInfo.CiAdrCity  },
-        { "Iptc4xmpCore:CiAdrCtry"  , &context.data.Iptc4xmpCore.CreatorContactInfo.CiAdrCtry  },
-        { "Iptc4xmpCore:CiAdrExtadr", &context.data.Iptc4xmpCore.CreatorContactInfo.CiAdrExtadr},
-        { "Iptc4xmpCore:CiAdrPcode" , &context.data.Iptc4xmpCore.CreatorContactInfo.CiAdrPcode },
-        { "Iptc4xmpCore:CiAdrRegion", &context.data.Iptc4xmpCore.CreatorContactInfo.CiAdrRegion},
-        { "Iptc4xmpCore:CiEmailWork", &context.data.Iptc4xmpCore.CreatorContactInfo.CiEmailWork},
-        { "Iptc4xmpCore:CiTelWork"  , &context.data.Iptc4xmpCore.CreatorContactInfo.CiTelWork  },
-        { "Iptc4xmpCore:CiUrlWork"  , &context.data.Iptc4xmpCore.CreatorContactInfo.CiUrlWork  },
-  
-        { "Iptc4xmpCore:IntellectualGenre" , &context.data.Iptc4xmpCore.IntellectualGenre },
-        { "Iptc4xmpCore:Location"          , &context.data.Iptc4xmpCore.Location },
-        { "Iptc4xmpCore:Scene"             , &context.data.Iptc4xmpCore.Scene },
-        { "Iptc4xmpCore:SubjectCode"       , &context.data.Iptc4xmpCore.SubjectCode },
+        { "Iptc4xmpCore:IntellectualGenre" , &context.xmp.Iptc4xmpCore.IntellectualGenre },
+        { "Iptc4xmpCore:Location"          , &context.xmp.Iptc4xmpCore.Location },
+        { "Iptc4xmpCore:Scene"             , &context.xmp.Iptc4xmpCore.Scene },
+        { "Iptc4xmpCore:SubjectCode"       , &context.xmp.Iptc4xmpCore.SubjectCode },
 
-        { "dc:creator"              , &context.data.dc.creator, 2 },
-        { "dc:date"                 , &context.data.dc.date, 2 },
-        { "dc:description"          , &context.data.dc.description, 2 },
-        { "dc:subject"              , &context.data.dc.subject, 2, true },
-        { "dc:title"                , &context.data.dc.title, 2 }
+        { "Iptc4xmpExt:AOCopyrightNotice"           , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCopyrightNotice, 0, false, "Iptc4xmpExt:ArtworkOrObject" },
+        { "Iptc4xmpExt:AOCreator"                   , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCreator,         0, false, "Iptc4xmpExt:ArtworkOrObject" },
+        { "Iptc4xmpExt:AOCircaDateCreated"          , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated },
+        { "Iptc4xmpExt:AOContentDescription"        , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOContentDescription, 2 },
+        { "Iptc4xmpExt:AOContributionDescription"   , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOContributionDescription, 2 },
+        { "Iptc4xmpExt:AOCreatorId"                 , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCreatorId, 2 },
+                                                    
+        { "Iptc4xmpExt:AOCurrentCopyrightOwnerId"   , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerId },
+        { "Iptc4xmpExt:AOCurrentCopyrightOwnerName" , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerName },
+        { "Iptc4xmpExt:AOCurrentLicensorId"         , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorId},
+        { "Iptc4xmpExt:AOCurrentLicensorName"       , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorName},
+
+        { "Iptc4xmpExt:AOPhysicalDescription"       , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOPhysicalDescription, 2 },
+        { "Iptc4xmpExt:AOSource"                    , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOSource},
+        { "Iptc4xmpExt:AOSourceInvNo"               , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOSourceInvNo},
+        { "Iptc4xmpExt:AOSourceInvURL"              , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOSourceInvURL},
+        { "Iptc4xmpExt:AOStylePeriod"               , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOStylePeriod, 2},
+        { "Iptc4xmpExt:AOTitle"                     , &context.xmp.Iptc4xmpExt.ArtworkOrObject.AOTitle, 2},
+
+        { "Iptc4xmpExt:DigImageGUID"                , &context.xmp.Iptc4xmpExt.DigImageGUID},
+        { "Iptc4xmpExt:EmbdEncRightsExpr"           , &context.xmp.Iptc4xmpExt.EmbdEncRightsExpr, 2},
+        { "Iptc4xmpExt:DigitalSourceType"           , &context.xmp.Iptc4xmpExt.DigitalSourceType},
+        { "Iptc4xmpExt:Event"                       , &context.xmp.Iptc4xmpExt.Event, 2},
+        { "Iptc4xmpExt:EventId"                     , &context.xmp.Iptc4xmpExt.EventId, 2},
+
+        { "Iptc4xmpExt:LinkedRightsExpr"        , &context.xmp.Iptc4xmpExt.LinkedEncRightsExpr.LinkedRightsExpr,  0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+        { "Iptc4xmpExt:RightsExprEncType"       , &context.xmp.Iptc4xmpExt.LinkedEncRightsExpr.RightsExprEncType, 0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+        { "Iptc4xmpExt:RightsExprLangId"        , &context.xmp.Iptc4xmpExt.LinkedEncRightsExpr.RightsExprLangId,  0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+
+        { "Iptc4xmpExt:City"                    , &context.xmp.Iptc4xmpExt.LocationCreated.City,          0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:CountryCode"             , &context.xmp.Iptc4xmpExt.LocationCreated.CountryCode,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:CountryName"             , &context.xmp.Iptc4xmpExt.LocationCreated.CountryName,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:ProvinceState"           , &context.xmp.Iptc4xmpExt.LocationCreated.ProvinceState, 0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:Sublocation"             , &context.xmp.Iptc4xmpExt.LocationCreated.Sublocation,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:WorldRegion"             , &context.xmp.Iptc4xmpExt.LocationCreated.WorldRegion,   0, false, "Iptc4xmpExt:LocationCreated"},
+
+        { "Iptc4xmpExt:City"                    , &context.xmp.Iptc4xmpExt.LocationShown.City,          0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:CountryCode"             , &context.xmp.Iptc4xmpExt.LocationShown.CountryCode,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:CountryName"             , &context.xmp.Iptc4xmpExt.LocationShown.CountryName,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:ProvinceState"           , &context.xmp.Iptc4xmpExt.LocationShown.ProvinceState, 0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:Sublocation"             , &context.xmp.Iptc4xmpExt.LocationShown.Sublocation,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:WorldRegion"             , &context.xmp.Iptc4xmpExt.LocationShown.WorldRegion,   0, false, "Iptc4xmpExt:LocationShown"},
+
+        { "Iptc4xmpExt:MaxAvailHeight"          , &context.xmp.Iptc4xmpExt.MaxAvailHeight},
+        { "Iptc4xmpExt:MaxAvailWidth"           , &context.xmp.Iptc4xmpExt.MaxAvailWidth},
+        { "Iptc4xmpExt:ModelAge"                , &context.xmp.Iptc4xmpExt.ModelAge},
+
+        { "Iptc4xmpExt:PersonCharacteristic" , &context.xmp.Iptc4xmpExt.PersonInImageWDetails.PersonCharacteristic, 7, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonDescription"    , &context.xmp.Iptc4xmpExt.PersonInImageWDetails.PersonDescription,    2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonId"             , &context.xmp.Iptc4xmpExt.PersonInImageWDetails.PersonId,             2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonName"           , &context.xmp.Iptc4xmpExt.PersonInImageWDetails.PersonName,           2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+
+        { "Iptc4xmpExt:ProductDescription"   , &context.xmp.Iptc4xmpExt.ProductInImage.ProductDescription, 2, true,  "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductGTIN"          , &context.xmp.Iptc4xmpExt.ProductInImage.ProductGTIN,        0, false, "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductId"            , &context.xmp.Iptc4xmpExt.ProductInImage.ProductId,          0, false, "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductName"          , &context.xmp.Iptc4xmpExt.ProductInImage.ProductName,        2, true,  "Iptc4xmpExt:ProductInImage"},
+
+        { "Iptc4xmpExt:OrganisationInImageCode" , &context.xmp.Iptc4xmpExt.OrganisationInImageCode, 2},
+        { "Iptc4xmpExt:OrganisationInImageName" , &context.xmp.Iptc4xmpExt.OrganisationInImageName, 2},
+        { "Iptc4xmpExt:PersonInImage"           , &context.xmp.Iptc4xmpExt.PersonInImage,           2},
+        { "Iptc4xmpExt:PersonCharacteristic"    , &context.xmp.Iptc4xmpExt.PersonCharacteristic,    2},
+        { "Iptc4xmpExt:PersonDescription"       , &context.xmp.Iptc4xmpExt.PersonDescription,       2},
+
+        { "Iptc4xmpExt:RegItemId"            , &context.xmp.Iptc4xmpExt.RegistryId.RegItemId},
+        { "Iptc4xmpExt:RegOrgId"             , &context.xmp.Iptc4xmpExt.RegistryId.RegOrgId},
+
+        { "Iptc4xmpExt:CvId"                 , &context.xmp.Iptc4xmpExt.AboutCvTerm.CvId,               0, false, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermId"             , &context.xmp.Iptc4xmpExt.AboutCvTerm.CvTermId,           0, false, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermName"           , &context.xmp.Iptc4xmpExt.AboutCvTerm.CvTermName,         2, true, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermRefinedAbout"   , &context.xmp.Iptc4xmpExt.AboutCvTerm.CvTermRefinedAbout, 0, false, "Iptc4xmpExt:AboutCvTerm"},
+
+        { "dc:creator"              , &context.xmp.dc.creator,      2, true },
+        { "dc:date"                 , &context.xmp.dc.date,         2, true },
+        { "dc:format"               , &context.xmp.dc.format},
+        { "dc:description"          , &context.xmp.dc.description,  2, true },
+        { "dc:rights"               , &context.xmp.dc.rights,       2, true },
+        { "dc:subject"              , &context.xmp.dc.subject,      2, true },
+        { "dc:title"                , &context.xmp.dc.title,        2, true },
+
+        { "aux:Lens"                , &context.xmp.Lens },
+
+        { "exif:GPSAltitude"        , &context.xmp.exif.GPSAltitude },
+        { "exif:GPSAltitudeRef"     , &context.xmp.exif.GPSAltitudeRef },
+        { "exif:GPSLatitude"        , &context.xmp.exif.GPSLatitude },
+        { "exif:GPSLongitude"       , &context.xmp.exif.GPSLongitude },
+
+        { "xmp:CreateDate"          , &context.xmp.CreateDate },
+        { "xmp:CreatorTool"         , &context.xmp.CreatorTool },
+        { "xmp:MetadataDate"        , &context.xmp.MetadataDate },
+        { "xmp:ModifyDate"          , &context.xmp.ModifyDate },
+        { "xmp:Rating"              , &context.xmp.Rating },
+
+        // for disambiguation non-parented items must apprear last in the list
+        { "Iptc4xmpExt:AOCopyrightNotice"           , &context.xmp.Iptc4xmpExt.AOCopyrightNotice },
+        { "Iptc4xmpExt:AOCreator"                   , &context.xmp.Iptc4xmpExt.AOCreator         },
+        { "Iptc4xmpExt:AODateCreated"               , &context.xmp.Iptc4xmpExt.AODateCreated },
+        { "Iptc4xmpExt:AddlModelInfo"               , &context.xmp.Iptc4xmpExt.AddlModelInfo },
+
+        { "Iptc4xmpCore:CountryCode", &context.xmp.Iptc4xmpCore.CountryCode }
     };
     context.index = -1;
     context.npv = npv;
     context.npv_count = countof(npv);
-	verbose = true;
-    FILE* file = fopen("../metadata_test_file_IIM_XMP_EXIF.xml", "r");
+//  FILE* file = fopen("../metadata_test_file_IIM_XMP_EXIF.xml", "r");
+    FILE* file = fopen("../IPTC-PhotometadataRef-Std2022.1.xml", "r");
 	int c = getc(file);
-    while (c != EOF) {
+    while (c != EOF && r >= 0) {
 		r = yxml_parse(&context.yxml, c);
-		y_printres(&context.yxml, r);
-        c = getc(file);
+        if (r >= 0) {
+		    yxml_xmp(&context.yxml, r);
+            c = getc(file);
+        }
 	}
-	y_printtoken(&context.yxml, yxml_eof(&context.yxml) < 0 ? "error\n" : "ok\n");
-    traceln("context.subject: %s", context.data.dc.subject);
     fclose(file);
+    assert(r == YXML_OK, "r: %d", r);
+	bool ok = yxml_eof(&context.yxml) >= 0;
+    for (int i = 0; i < context.npv_count; i++) {
+        if (*context.npv[i].v == null || *context.npv[i].v[0] == 0) {
+            *context.npv[i].v = ""; // much easier for the client
+        } else { // trim white space. UTF-8 single characters can be negative
+            // isspace() isspace returns true for space, form feed, line feed, 
+            // carriage return, horizontal tab, and vertical tab. 
+            // isblank() returns true only for space and horizontal tab.
+            while (isspace((uint8_t)*context.npv[i].v[0])) {
+                (*context.npv[i].v)++;
+            }
+            char* p = (char*)*context.npv[i].v + strlen(*context.npv[i].v) - 1;
+            while (p >= *context.npv[i].v && isspace((uint8_t)*p)) {
+                *p-- = 0;
+            }
+        }
+    }
+    context.npv = npv;
+    context.npv_count = countof(npv);
+    traceln("ok: %d", ok);
+    #define dump(field) do { \
+        /* assert(context.xmp.field != null && context.xmp.field[0] != 0); */ \
+        traceln("%-55s: %s", #field, rdf2str(context.xmp.field)); \
+    } while (0)
+    dump(Iptc4xmpCore.CountryCode);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrCity );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrCtry );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrExtadr);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrPcode);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrRegion);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiEmailWork);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiTelWork );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiUrlWork );
+    dump(Iptc4xmpCore.IntellectualGenre);
+    dump(Iptc4xmpCore.Location);
+    dump(Iptc4xmpCore.Scene);
+    dump(Iptc4xmpCore.SubjectCode);
+    dump(Iptc4xmpExt.AOCopyrightNotice);
+    dump(Iptc4xmpExt.AOCreator);
+    dump(Iptc4xmpExt.AODateCreated);
+    dump(Iptc4xmpExt.AddlModelInfo);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCopyrightNotice);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCreator);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOContentDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOContributionDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCreatorId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerName);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorName);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOPhysicalDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSource);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSourceInvNo);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSourceInvURL);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOStylePeriod);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOTitle);
+    dump(Iptc4xmpExt.DigImageGUID);
+    dump(Iptc4xmpExt.EmbdEncRightsExpr);
+    dump(Iptc4xmpExt.DigitalSourceType);
+    dump(Iptc4xmpExt.Event);
+    dump(Iptc4xmpExt.EventId);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.LinkedRightsExpr);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.RightsExprEncType);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.RightsExprLangId);
+    dump(Iptc4xmpExt.LocationCreated.City);
+    dump(Iptc4xmpExt.LocationCreated.CountryCode);
+    dump(Iptc4xmpExt.LocationCreated.CountryName);
+    dump(Iptc4xmpExt.LocationCreated.ProvinceState);
+    dump(Iptc4xmpExt.LocationCreated.Sublocation);
+    dump(Iptc4xmpExt.LocationCreated.WorldRegion);
+    dump(Iptc4xmpExt.LocationShown.City);
+    dump(Iptc4xmpExt.LocationShown.CountryCode);
+    dump(Iptc4xmpExt.LocationShown.CountryName);
+    dump(Iptc4xmpExt.LocationShown.ProvinceState);
+    dump(Iptc4xmpExt.LocationShown.Sublocation);
+    dump(Iptc4xmpExt.LocationShown.WorldRegion);
+    dump(Iptc4xmpExt.MaxAvailHeight);
+    dump(Iptc4xmpExt.MaxAvailWidth);
+    dump(Iptc4xmpExt.ModelAge);
+    dump(Iptc4xmpExt.OrganisationInImageCode);
+    dump(Iptc4xmpExt.OrganisationInImageName);
+    dump(Iptc4xmpExt.PersonInImage);
+    dump(Iptc4xmpExt.PersonCharacteristic);
+    dump(Iptc4xmpExt.PersonDescription);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonCharacteristic);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonDescription);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonId);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonName);
+    dump(Iptc4xmpExt.ProductInImage.ProductDescription);
+    dump(Iptc4xmpExt.ProductInImage.ProductGTIN);
+    dump(Iptc4xmpExt.ProductInImage.ProductId);
+    dump(Iptc4xmpExt.ProductInImage.ProductName);
+    dump(Iptc4xmpExt.RegistryId.RegItemId);
+    dump(Iptc4xmpExt.RegistryId.RegOrgId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermName);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermRefinedAbout);
+    dump(dc.creator);
+    dump(dc.date);
+    dump(dc.format);
+    dump(dc.description);
+    dump(dc.rights);
+    dump(dc.subject);
+    dump(dc.title);
+    dump(Lens);
+    dump(exif.GPSAltitude);
+    dump(exif.GPSAltitudeRef);
+    dump(exif.GPSLatitude);
+    dump(exif.GPSLongitude);
+    dump(CreateDate);
+    dump(CreatorTool);
+    dump(MetadataDate);
+    dump(ModifyDate);
+    dump(Rating);
 }
+
+// TODO: this is vast and not very useful in generic case: 
+// <MicrosoftPhoto:Rating>0</MicrosoftPhoto:Rating>
+// <aux:Lens>Samsung Galaxy S7 Rear Camera</aux:Lens>
+// <xmpMM:History>
+// <xmpRights:Marked>True</xmpRights:Marked>
+// <xmpRights:UsageTerms>
+// <crs:AlreadyApplied>True</crs:AlreadyApplied>  Adobe Camera Raw Settings
+// <photomechanic:ColorClass>0</photomechanic:ColorClass>
+// <photomechanic:EditStatus>edit status</photomechanic:EditStatus>
+// <photomechanic:PMVersion>PM5</photomechanic:PMVersion>
+// <photomechanic:Prefs>0:0:0:-00001</photomechanic:Prefs>
+// <photomechanic:Tagged>False</photomechanic:Tagged>
+// <photoshop:AuthorsPosition>stf</photoshop:AuthorsPosition>
+// <photoshop:CaptionWriter>jp</photoshop:CaptionWriter>
+// <photoshop:Category>Category</photoshop:Category>
+// <photoshop:City>Anytown</photoshop:City>
+// <photoshop:Country>United States</photoshop:Country>
+// <photoshop:Credit>credit here</photoshop:Credit>
+// <photoshop:DateCreated>2017-05-29T17:19:21-04:00</photoshop:DateCreated>
+// <plus:CopyrightOwnerID>Default</plus:CopyrightOwnerID>
+// <plus:CopyrightOwnerName>Joe Photographer</plus:CopyrightOwnerName>
+// <photoshop:History>
 
 static void init(void) {
     app.title = title;
@@ -728,8 +1063,10 @@ static void init(void) {
     bool test = args.option_bool(&app.argc, app.argv, "--test");
 //  traceln("test: %d", test);
     test_xml();
-    if (app.argc > 0) exit(1);
-    test_exif("../metadata_test_file_IIM_XMP_EXIF.jpg");
+//  if (app.argc > 0) exit(1);
+//  if (app.argc > 0) exit(1);
+//  test_exif("../metadata_test_file_IIM_XMP_EXIF.jpg");
+//  test_exif("../IPTC-PhotometadataRef-Std2022.1.jpg");
     if (app.argc > 0) exit(1);
     if (test && app.argc > 1 && files.exists(app.argv[1]) && !files.is_folder(app.argv[1])) {
         test_exif(app.argv[1]);

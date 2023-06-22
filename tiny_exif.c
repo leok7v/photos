@@ -177,6 +177,7 @@ static int strcasecmp(const char* a, const char* b) { return _stricmp(a, b); }
 #define TAG_EXIFVERSION                 0x9000
 #define TAG_DATE_TIME_ORIGINAL          0x9003
 #define TAG_DATE_TIME_DIGITIZED         0x9004
+#define TAG_OFFSET_TIME_ORIGINAL        0x9011
 #define TAG_COMPONENT_CONFIG            0x9101
 #define TAG_COMPRESSED_BITS_PER_PIXEL   0x9102
 #define TAG_SHUTTERSPEED                0x9201
@@ -903,6 +904,18 @@ static void exif_parse_ifd(entry_parser_t* p) {
             break;
         case TAG_SCENE_CAPTURE_TYPE:
             parser_fetch16(p, &p->info->CaptureType);
+            break;
+        case TAG_YCC_POSITIONING:
+            parser_fetch16(p, &p->info->YCCPositioning);
+            break;
+        case TAG_OFFSET_TIME_ORIGINAL:
+            parser_fetch_str(p, &p->info->OffsetTimeOriginal);
+            break;
+        case TAG_COMPONENT_CONFIG:
+            parser_fetch16(p, &p->info->ComponentConfig);
+            break;
+        case TAG_FLASH_PIX_VERSION:	 
+            parser_fetch32(p, &p->info->FlashPixVersion);
             break;
         default:
             traceln("skip: 0x%04X", p->tag);
