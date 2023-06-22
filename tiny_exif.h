@@ -74,8 +74,9 @@ typedef const char* exif_rdf_t; // similar to getenv() result
 typedef struct exif_info_s {
     bool has_app1;
     bool has_xmp;
+    bool not_enough_memory;         // examine on error and resize something...
     bool dump;                      // client can set to true prio calling to debug
-    char strings[32 * 1024];        // EXIF UTF-8 string storage (max 64KB)
+    char strings[64 * 1024];        // EXIF UTF-8 string storage (max APP1 segment is 64KB)
     char* next;                     // next unused EXIF UTF-8 string storage
     // Data fields
     uint32_t Fields;                // Store if EXIF and/or XMP data fields are available

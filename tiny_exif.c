@@ -37,8 +37,10 @@
 #include <math.h>
 #include <string.h>
 #include <inttypes.h>
-#include "crt.h"
+#include <assert.h>
+#include <ctype.h>
 #include "yxml.h"
+#include "crt.h"
 
 #ifndef null
 #define null ((void*)0)
@@ -46,6 +48,14 @@
 
 #ifdef _MSC_VER
 static int strcasecmp(const char* a, const char* b) { return _stricmp(a, b); }
+#endif
+
+#ifndef countof
+#define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
+#endif
+
+#ifndef traceln
+#define traceln(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
 #endif
 
 // https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif.html
@@ -624,7 +634,6 @@ static void exif_parse_ifd(entry_parser_t* p) {
     switch (p->tag) {
         case 0x02bc:
             p->info->has_xmp = true;
-            traceln("TODO: XMP?");
     		// XMP Metadata (Adobe technote 9-14-02)
 		    if (is_undefined(p)) {
 			    exif_str_t xml = null;
@@ -1401,37 +1410,42 @@ static inline bool yxml_strequ(const char* s0, const char* s1) {
 static void yxml_element_start(yxml_t* x) {
     xml_context_t* ctx = (xml_context_t*)x;
 	assert(yxml_symlen(x, x->elem) == strlen(x->elem));
-    fatal_if(ctx->top >= countof(ctx->stack));
-    ctx->stack[ctx->top++] = x->elem;
-    for (int i = 0; i < ctx->npv_count && ctx->index < 0; i++) {
-        // if .up == 0 both up and top are the same and are top
-        //             element of the stack
-        // if .up > 0  up could be empty "" or parent/grandparent
-        //             of element
-        // In XMP spec the elements may have rdf:containers as content
-        //             but in the field broken writters may write single
-        //             item container as direct content.
-        const char* up  = yxml_parent(ctx, ctx->npv[i].up);
-        const char* top = yxml_parent(ctx, 0);
-        const char* name = ctx->npv[i].n;
-        if (yxml_strequ(up, name) || yxml_strequ(top, name)) {
-            const char* parent = ctx->npv[i].p;
-            bool has_parent = parent == null; // parent was not required
-            for (int p = ctx->top - 2; p >= 0 && !has_parent; p--) {
-                has_parent = yxml_strequ(ctx->stack[p], parent);
-            }
-            if (has_parent) {
-                assert(ctx->index < 0, "content nesting not supported");
-                if (!ctx->npv[i].append || *ctx->npv[i].v == null || *ctx->npv[i].v[0] == 0) {
-                    ctx->ei->next++; // extra zero byte after zero separated appended rdf:li
-                    *ctx->npv[i].v = ctx->ei->next;
-                } else { // appended values "\x00" separated:
-                    fatal_if(ctx->ei->next + 3 >= ctx->ei->strings + countof(ctx->ei->strings));
-                    memcpy(ctx->ei->next, "\x00\x00", 2); // including terminating double zero
-                    ctx->ei->next++; // only advance first "\x00" byte
+    if (ctx->ei->not_enough_memory || ctx->top >= countof(ctx->stack)) {
+        ctx->ei->not_enough_memory = true;
+    } else {
+        ctx->stack[ctx->top++] = x->elem;
+        for (int i = 0; i < ctx->npv_count && ctx->index < 0; i++) {
+            // if .up == 0 both up and top are the same and are top
+            //             element of the stack
+            // if .up > 0  up could be empty "" or parent/grandparent
+            //             of element
+            // In XMP spec the elements may have rdf:containers as content
+            //             but in the field broken writters may write single
+            //             item container as direct content.
+            const char* up  = yxml_parent(ctx, ctx->npv[i].up);
+            const char* top = yxml_parent(ctx, 0);
+            const char* name = ctx->npv[i].n;
+            if (yxml_strequ(up, name) || yxml_strequ(top, name)) {
+                const char* parent = ctx->npv[i].p;
+                bool has_parent = parent == null; // parent was not required
+                for (int p = ctx->top - 2; p >= 0 && !has_parent; p--) {
+                    has_parent = yxml_strequ(ctx->stack[p], parent);
                 }
-                ctx->index = i;
-//              if (strstr(top, "EventId") != null) { crt.breakpoint(); }
+                if (has_parent) {
+                    assert(ctx->index < 0); // no content nesting!
+                    if (!ctx->npv[i].append || *ctx->npv[i].v == null || *ctx->npv[i].v[0] == 0) {
+                        ctx->ei->next++; // extra zero byte after zero separated appended rdf:li
+                        *ctx->npv[i].v = ctx->ei->next;
+                    } else { // appended values "\x00" separated:
+                        if (ctx->ei->next + 3 >= ctx->ei->strings + countof(ctx->ei->strings)) {
+                            ctx->ei->not_enough_memory = true;
+                            break;
+                        }
+                        memcpy(ctx->ei->next, "\x00\x00", 2); // including terminating double zero
+                        ctx->ei->next++; // only advance first "\x00" byte
+                    }
+                    ctx->index = i;
+                }
             }
         }
     }
@@ -1439,32 +1453,37 @@ static void yxml_element_start(yxml_t* x) {
 
 static void yxml_content(yxml_t* x) {
     xml_context_t* ctx = (xml_context_t*)x;
-    if (ctx->index >= 0) {
-        char* p = ctx->yxml.data;
-        if (ctx->ei->next[0] == 0) { // skip starting white space bytes
-            while (isspace(*(uint8_t*)p)) { p++; }
+    if (!ctx->ei->not_enough_memory) {
+        if (ctx->index >= 0) {
+            char* p = ctx->yxml.data;
+            if (ctx->ei->next[0] == 0) { // skip starting white space bytes
+                while (isspace(*(uint8_t*)p)) { p++; }
+            }
+            const int64_t k = strlen((char*)p);
+            if (ctx->ei->next + k + 1 >= ctx->ei->strings + countof(ctx->ei->strings)) {
+                ctx->ei->not_enough_memory = true;
+            }
+            memcpy(ctx->ei->next, p, k + 1); // including terminating zero byte
+            ctx->ei->next += k;
         }
-        const int64_t k = strlen((char*)p);
-        fatal_if(ctx->ei->next + k + 1 >= ctx->ei->strings + countof(ctx->ei->strings));
-        memcpy(ctx->ei->next, p, k + 1); // including terminating zero byte
-        ctx->ei->next += k;
     }
 }
 
 static void yxml_element_end(yxml_t* x) {
     xml_context_t* ctx = (xml_context_t*)x;
-    assert(ctx->top > 0);
-    const int i = ctx->index;
-    if (i >= 0) {
-        const char* top = yxml_parent(ctx, 0);
-//      if (strstr(top, "EventId") != null) { crt.breakpoint(); }
-        const char* name = ctx->npv[i].n;
-        if (yxml_strequ(top, name)) {
-            ctx->index = -1;
+    if (!ctx->ei->not_enough_memory) {
+        assert(ctx->top > 0);
+        const int i = ctx->index;
+        if (i >= 0) {
+            const char* top = yxml_parent(ctx, 0);
+            const char* name = ctx->npv[i].n;
+            if (yxml_strequ(top, name)) {
+                ctx->index = -1;
+            }
+            ctx->ei->next++; // double zero byte termination
         }
-        ctx->ei->next++; // double zero byte termination
+        ctx->top--;
     }
-    ctx->top--;
 }
 
 static void yxml_xmp(yxml_t* x, yxml_ret_t r) {
@@ -1482,7 +1501,7 @@ static void yxml_xmp(yxml_t* x, yxml_ret_t r) {
 	    case YXML_OK:
 		    break;
 	    default:
-		    assert(false, "r: %d", r);
+		    assert(r != YXML_OK);
 	}
 }
 
@@ -1607,7 +1626,7 @@ static int parse_xmp_xml(exif_info_t* ei, const char* xml, uint32_t bytes) {
     parse_xmp_legacy(ei, xml, bytes);
     xml_context_t context = {0};
     context.ei = ei;
-    char xml_stack[8 * 1024];
+    char xml_stack[8 * 1024]; // the xml_stack size is determined by the longest tag in depth...
 	yxml_init(&context.yxml, xml_stack, sizeof(xml_stack));
     // nvp O(n^2) not a performance champion. Can be optimized using hashmaps
     xml_npv_t npv[] = {
@@ -1729,7 +1748,8 @@ static int parse_xmp_xml(exif_info_t* ei, const char* xml, uint32_t bytes) {
     context.npv_count = countof(npv);
     context.index = -1;
     yxml_ret_t r = YXML_OK;
-    for (uint32_t i = 0; i < bytes; i++) {
+    context.ei->not_enough_memory = false;
+    for (uint32_t i = 0; i < bytes && !context.ei->not_enough_memory; i++) {
 		r = yxml_parse(&context.yxml, xml[i]);
         if (r >= 0) {
 		    yxml_xmp(&context.yxml, r);
