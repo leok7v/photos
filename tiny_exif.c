@@ -9,25 +9,25 @@
   Based on the easyexif library (2013 version)
     https://github.com/mayanklahiri/easyexif
   of Mayank Lahiri (mlahiri@gmail.com).
-  
-  Redistribution and use in source and binary forms, with or without 
+
+  Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions are met:
 
-   - Redistributions of source code must retain the above copyright notice, 
+   - Redistributions of source code must retain the above copyright notice,
      this list of conditions and the following disclaimer.
-   - Redistributions in binary form must reproduce the above copyright notice, 
-     this list of conditions and the following disclaimer in the documentation 
+   - Redistributions in binary form must reproduce the above copyright notice,
+     this list of conditions and the following disclaimer in the documentation
    and/or other materials provided with the distribution.
 
-  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY EXPRESS 
-  OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES 
-  OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN 
-  NO EVENT SHALL THE FREEBSD PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, 
-  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, 
-  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
-  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY 
-  OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING 
-  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY EXPRESS
+  OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+  OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN
+  NO EVENT SHALL THE FREEBSD PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+  OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
@@ -36,7 +36,9 @@
 #include <float.h>
 #include <math.h>
 #include <string.h>
+#include <inttypes.h>
 #include "crt.h"
+#include "yxml.h"
 
 #ifndef null
 #define null ((void*)0)
@@ -47,7 +49,7 @@ static int strcasecmp(const char* a, const char* b) { return _stricmp(a, b); }
 #endif
 
 // https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif.html
-/* tags https://github.com/php/php-src/blob/master/ext/exif/exif.c */ 
+/* tags https://github.com/php/php-src/blob/master/ext/exif/exif.c */
 #define TAG_GPS_VERSION_ID              0x0000
 #define TAG_GPS_LATITUDE_REF            0x0001
 #define TAG_GPS_LATITUDE                0x0002
@@ -311,7 +313,7 @@ typedef struct entry_parser_s {
     uint32_t tiff_header_start;
     bool     alignIntel; // byte alignment (defined in EXIF header)
     uint32_t offs; // current offset into buffer
-    uint16_t tag; 
+    uint16_t tag;
     uint16_t format;
     uint32_t length;
     exif_info_t* info;
@@ -323,12 +325,12 @@ static void parser_init(entry_parser_t* p, uint32_t _offs) {
 
 static uint32_t parse32(const uint8_t* buf, bool intel);
 
-static uint32_t get_data(entry_parser_t* p) { 
-    return parse32(p->data + p->offs + 8, p->alignIntel); 
+static uint32_t get_data(entry_parser_t* p) {
+    return parse32(p->data + p->offs + 8, p->alignIntel);
 }
 
-static uint32_t get_sub_ifd(entry_parser_t* p) { 
-    return p->tiff_header_start + get_data(p); 
+static uint32_t get_sub_ifd(entry_parser_t* p) {
+    return p->tiff_header_start + get_data(p);
 }
 
 static bool is_short(entry_parser_t* p) { return p->format == 3; }
@@ -422,7 +424,7 @@ static void parse_tag(entry_parser_t* p) {
 static bool parser_fetch_str(entry_parser_t* p, exif_str_t* val) {
     if (p->format != 2 || p->length == 0)
         return false;
-    *val = parse_string(p, p->data, p->length, get_data(p), p->tiff_header_start, 
+    *val = parse_string(p, p->data, p->length, get_data(p), p->tiff_header_start,
         p->bytes, p->alignIntel);
     return true;
 }
@@ -484,132 +486,9 @@ static bool parser_fetch_float_as_doble(entry_parser_t* p, double* val) {
     return true;
 }
 
-static int parse_xmp_xml(const char* xml, uint32_t len) {
-    (void)xml; (void)len; // TODO: remove when xml is implemented
-    traceln("%.*s", len, xml);
-	// Skip xpacket end section so that tinyxml2 lib parses the section correctly.
-#ifndef TINYEXIF_NO_XMP_SUPPORT
-	const char* szEnd = Tools::strrnstr(xml, "<?xpacket end=", len);
-	if (szEnd != NULL)
-		len = (uint32_t)(szEnd - xml);
+static int parse_xmp_xml(exif_info_t* ei, const char* xml, uint32_t len);
 
-	// Try parsing the XML packet.
-	tinyxml2::XMLDocument doc;
-	const tinyxml2::XMLElement* document;
-	if (doc.Parse(xml, len) != tinyxml2::XML_SUCCESS ||
-		((document=doc.FirstChildElement("x:xmpmeta")) == NULL && (document=doc.FirstChildElement("xmp:xmpmeta")) == NULL) ||
-		(document=document->FirstChildElement("rdf:RDF")) == NULL ||
-		(document=document->FirstChildElement("rdf:Description")) == NULL)
-		return PARSE_ABSENT_DATA;
-
-	// Try parsing the XMP content for tiff details.
-	if (Orientation == 0) {
-		uint32_t _Orientation(0);
-		document->QueryUnsignedAttribute("tiff:Orientation", &_Orientation);
-		Orientation = (uint16_t)_Orientation;
-	}
-	if (ImageWidth == 0 && ImageHeight == 0) {
-		document->QueryUnsignedAttribute("tiff:ImageWidth", &ImageWidth);
-		if (document->QueryUnsignedAttribute("tiff:ImageHeight", &ImageHeight) != tinyxml2::XML_SUCCESS)
-			document->QueryUnsignedAttribute("tiff:ImageLength", &ImageHeight) ;
-	}
-	if (XResolution == 0 && YResolution == 0 && ResolutionUnit == 0) {
-		document->QueryDoubleAttribute("tiff:XResolution", &XResolution);
-		document->QueryDoubleAttribute("tiff:YResolution", &YResolution);
-		uint32_t _ResolutionUnit(0);
-		document->QueryUnsignedAttribute("tiff:ResolutionUnit", &_ResolutionUnit);
-		ResolutionUnit = (uint16_t)_ResolutionUnit;
-	}
-	// Try parsing the XMP content for projection type.
-	{
-	    const tinyxml2::XMLElement* const element(document->FirstChildElement("GPano:ProjectionType"));
-	    if (element != NULL) {
-		    const char* const szProjectionType(element->GetText());
-		    if (szProjectionType != NULL) {
-			    if (0 == strcasecmp(szProjectionType, "perspective"))
-				    ProjectionType = 1;
-			    else
-			    if (0 == strcasecmp(szProjectionType, "equirectangular") ||
-				    0 == strcasecmp(szProjectionType, "spherical"))
-				    ProjectionType = 2;
-		    }
-	    }
-	}
-	// Try parsing the XMP content for supported maker's info.
-	struct ParseXMP	{
-		// try yo fetch the value both from the attribute and child element
-		// and parse if needed rational numbers stored as string fraction
-		static bool Value(const tinyxml2::XMLElement* document, const char* name, double& value) {
-			const char* szAttribute = document->Attribute(name);
-			if (szAttribute == NULL) {
-				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
-				if (element == NULL || (szAttribute=element->GetText()) == NULL)
-					return false;
-			}
-			std::vector<std::string> values;
-			Tools::strSplit(szAttribute, '/', values);
-			switch (values.size()) {
-			case 1: value = strtod(values.front().c_str(), NULL); return true;
-			case 2: value = strtod(values.front().c_str(), NULL)/strtod(values.back().c_str(), NULL); return true;
-			}
-			return false;
-		}
-		// same as previous function but with unsigned int results
-		static bool Value(const tinyxml2::XMLElement* document, const char* name, uint32_t& value) {
-			const char* szAttribute = document->Attribute(name);
-			if (szAttribute == NULL) {
-				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
-				if (element == NULL || (szAttribute = element->GetText()) == NULL)
-					return false;
-			}
-			value = strtoul(szAttribute, NULL, 0); return true;
-			return false;
-		}
-	};
-	const char* szAbout(document->Attribute("rdf:about"));
-	if (0 == strcasecmp(Make.c_str(), "DJI") || (szAbout != NULL && 0 == strcasecmp(szAbout, "DJI Meta Data"))) {
-		ParseXMP::Value(document, "drone-dji:AbsoluteAltitude", GeoLocation.Altitude);
-		ParseXMP::Value(document, "drone-dji:RelativeAltitude", GeoLocation.RelativeAltitude);
-		ParseXMP::Value(document, "drone-dji:GimbalRollDegree", GeoLocation.RollDegree);
-		ParseXMP::Value(document, "drone-dji:GimbalPitchDegree", GeoLocation.PitchDegree);
-		ParseXMP::Value(document, "drone-dji:GimbalYawDegree", GeoLocation.YawDegree);
-		ParseXMP::Value(document, "drone-dji:CalibratedFocalLength", Calibration.FocalLength);
-		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterX", Calibration.OpticalCenterX);
-		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterY", Calibration.OpticalCenterY);
-	} else if (0 == strcasecmp(Make.c_str(), "senseFly") || 0 == strcasecmp(Make.c_str(), "Sentera")) {
-		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree);
-		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree)) {
-			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
-			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
-		}
-		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree);
-		ParseXMP::Value(document, "Camera:GPSXYAccuracy", GeoLocation.AccuracyXY);
-		ParseXMP::Value(document, "Camera:GPSZAccuracy", GeoLocation.AccuracyZ);
-	} else if (0 == strcasecmp(Make.c_str(), "PARROT")) {
-		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree) ||
-		ParseXMP::Value(document, "drone-parrot:CameraRollDegree", GeoLocation.RollDegree);
-		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree) ||
-			ParseXMP::Value(document, "drone-parrot:CameraPitchDegree", GeoLocation.PitchDegree)) {
-			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
-			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
-		}
-		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree) ||
-		ParseXMP::Value(document, "drone-parrot:CameraYawDegree", GeoLocation.YawDegree);
-		ParseXMP::Value(document, "Camera:AboveGroundAltitude", GeoLocation.RelativeAltitude);
-	}
-	ParseXMP::Value(document, "GPano:PosePitchDegrees", GPano.PosePitchDegrees);
-	ParseXMP::Value(document, "GPano:PoseRollDegrees", GPano.PoseRollDegrees);
-	// parse GCamera:MicroVideo
-	if (document->Attribute("GCamera:MicroVideo")) {
-		ParseXMP::Value(document, "GCamera:MicroVideo", MicroVideo.HasMicroVideo);
-		ParseXMP::Value(document, "GCamera:MicroVideoVersion", MicroVideo.MicroVideoVersion);
-		ParseXMP::Value(document, "GCamera:MicroVideoOffset", MicroVideo.MicroVideoOffset);
-	}
-#endif
-	return EXIF_PARSE_SUCCESS;
-}
-
-static int parse_xmp(const char* buf, unsigned len) {
+static int parse_xmp(exif_info_t* ei, const char* buf, unsigned len) {
 	unsigned offs = 29; // current offset into buffer
 	if (!buf || len < offs) {
 		return EXIF_PARSE_ABSENT_DATA;
@@ -618,7 +497,7 @@ static int parse_xmp(const char* buf, unsigned len) {
     } else if (offs >= len) {
 		return EXIF_PARSE_CORRUPT_DATA;
     } else {
-    	return parse_xmp_xml(buf + offs, len - offs);
+    	return parse_xmp_xml(ei, buf + offs, len - offs);
     }
 }
 
@@ -750,7 +629,7 @@ static void exif_parse_ifd(entry_parser_t* p) {
 		    if (is_undefined(p)) {
 			    exif_str_t xml = null;
                 parser_fetch_str(p, &xml);
-			    parse_xmp_xml(xml, (uint32_t)strlen(xml));
+			    parse_xmp_xml(p->info, xml, (uint32_t)strlen(xml));
 		    }
             break;
         case TAG_EXPOSURETIME: // Exposure time in seconds
@@ -914,7 +793,7 @@ static void exif_parse_ifd(entry_parser_t* p) {
         case TAG_COMPONENT_CONFIG:
             parser_fetch16(p, &p->info->ComponentConfig);
             break;
-        case TAG_FLASH_PIX_VERSION:	 
+        case TAG_FLASH_PIX_VERSION:
             parser_fetch32(p, &p->info->FlashPixVersion);
             break;
         default:
@@ -923,7 +802,7 @@ static void exif_parse_ifd(entry_parser_t* p) {
 }
 
 // Parse tag as Image IFD
-static void exif_parse_ifd_image(entry_parser_t* p, 
+static void exif_parse_ifd_image(entry_parser_t* p,
         uint32_t* exif_sub_ifd_offset, uint32_t* gps_sub_ifd_offset) {
     switch (p->tag) {
         case TAG_BITS_PER_SAMPLE:
@@ -1043,7 +922,7 @@ static int exif_parse_from_segment(exif_info_t* ei, const uint8_t* data, uint32_
     // Now parsing the TIFF header. The first two bytes are either "II" or
     // "MM" for Intel or Motorola byte alignment. Sanity check by parsing
     // the uint16_t that follows, making sure it equals 0x2a. The
-    // last 4 bytes are an offset into the first IFD, which are added to 
+    // last 4 bytes are an offset into the first IFD, which are added to
     // the global offset counter. For this block, we expect the following
     // minimum size:
     //  2 bytes: 'II' or 'MM'
@@ -1279,8 +1158,7 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                 int ret = exif_parse_from_segment(ei, buf, section_bytes);
                 switch (ret) {
                     case EXIF_PARSE_ABSENT_DATA:
-                        traceln("TODO: XMP");
-                        ret =parse_xmp((const char*)buf, section_bytes);
+                        ret =parse_xmp(ei, (const char*)buf, section_bytes);
 				        switch (ret) {
 				            case EXIF_PARSE_ABSENT_DATA:
 					            break;
@@ -1304,7 +1182,7 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
                 }
                 break;
             case JM_APP14:
-            case JM_APP13: // IPCT   
+            case JM_APP13: // IPCT
             case JM_SOF0:
             case JM_DHT:
             case JM_DQT:
@@ -1322,6 +1200,555 @@ int exif_parse_from_stream(exif_info_t* ei, exif_stream_t* stream) {
         }
     }
     return apps1 & EXIF_FIELD_ALL ? (int)EXIF_PARSE_SUCCESS : EXIF_PARSE_ABSENT_DATA;
+}
+
+// TODO: this is vast and not very useful in generic case:
+// see:
+// https://github.com/leok7v/photos/blob/main/metadata_test_file_IIM_XMP_EXIF.xml
+// https://github.com/leok7v/photos/blob/main/IPTC-PhotometadataRef-Std2022.1.xml
+// for details.
+// <MicrosoftPhoto:Rating>0</MicrosoftPhoto:Rating>
+// <aux:Lens>Samsung Galaxy S7 Rear Camera</aux:Lens>
+// <xmpMM:History>
+// <xmpRights:Marked>True</xmpRights:Marked>
+// <xmpRights:UsageTerms>
+// <crs:AlreadyApplied>True</crs:AlreadyApplied>  Adobe Camera Raw Settings
+// <photomechanic:ColorClass>0</photomechanic:ColorClass>
+// <photomechanic:EditStatus>edit status</photomechanic:EditStatus>
+// <photomechanic:PMVersion>PM5</photomechanic:PMVersion>
+// <photomechanic:Prefs>0:0:0:-00001</photomechanic:Prefs>
+// <photomechanic:Tagged>False</photomechanic:Tagged>
+// <photoshop:AuthorsPosition>stf</photoshop:AuthorsPosition>
+// <photoshop:CaptionWriter>jp</photoshop:CaptionWriter>
+// <photoshop:Category>Category</photoshop:Category>
+// <photoshop:City>Anytown</photoshop:City>
+// <photoshop:Country>United States</photoshop:Country>
+// <photoshop:Credit>credit here</photoshop:Credit>
+// <photoshop:DateCreated>2017-05-29T17:19:21-04:00</photoshop:DateCreated>
+// <plus:CopyrightOwnerID>Default</plus:CopyrightOwnerID>
+// <plus:CopyrightOwnerName>Joe Photographer</plus:CopyrightOwnerName>
+// <photoshop:History>
+
+static int parse_xmp_legacy(exif_info_t* ei, const char* xml, uint32_t len) {
+    (void)ei; (void)xml; (void)len; // TODO: remove when xml is implemented
+    // TODO: find test files with all those tags and implement them
+	// Skip xpacket end section so that tinyxml2 lib parses the section correctly.
+#ifdef TINYEXIF_LEGACY_XMP_SUPPORT // no way to test it in absence of test materials
+	const char* szEnd = Tools::strrnstr(xml, "<?xpacket end=", len);
+	if (szEnd != NULL)
+		len = (uint32_t)(szEnd - xml);
+
+	// Try parsing the XML packet.
+	tinyxml2::XMLDocument doc;
+	const tinyxml2::XMLElement* document;
+	if (doc.Parse(xml, len) != tinyxml2::XML_SUCCESS ||
+		((document=doc.FirstChildElement("x:xmpmeta")) == NULL && (document=doc.FirstChildElement("xmp:xmpmeta")) == NULL) ||
+		(document=document->FirstChildElement("rdf:RDF")) == NULL ||
+		(document=document->FirstChildElement("rdf:Description")) == NULL)
+		return PARSE_ABSENT_DATA;
+
+	// Try parsing the XMP content for tiff details.
+	if (Orientation == 0) {
+		uint32_t _Orientation(0);
+		document->QueryUnsignedAttribute("tiff:Orientation", &_Orientation);
+		Orientation = (uint16_t)_Orientation;
+	}
+	if (ImageWidth == 0 && ImageHeight == 0) {
+		document->QueryUnsignedAttribute("tiff:ImageWidth", &ImageWidth);
+		if (document->QueryUnsignedAttribute("tiff:ImageHeight", &ImageHeight) != tinyxml2::XML_SUCCESS)
+			document->QueryUnsignedAttribute("tiff:ImageLength", &ImageHeight) ;
+	}
+	if (XResolution == 0 && YResolution == 0 && ResolutionUnit == 0) {
+		document->QueryDoubleAttribute("tiff:XResolution", &XResolution);
+		document->QueryDoubleAttribute("tiff:YResolution", &YResolution);
+		uint32_t _ResolutionUnit(0);
+		document->QueryUnsignedAttribute("tiff:ResolutionUnit", &_ResolutionUnit);
+		ResolutionUnit = (uint16_t)_ResolutionUnit;
+	}
+	// Try parsing the XMP content for projection type.
+	{
+	    const tinyxml2::XMLElement* const element(document->FirstChildElement("GPano:ProjectionType"));
+	    if (element != NULL) {
+		    const char* const szProjectionType(element->GetText());
+		    if (szProjectionType != NULL) {
+			    if (0 == strcasecmp(szProjectionType, "perspective"))
+				    ProjectionType = 1;
+			    else
+			    if (0 == strcasecmp(szProjectionType, "equirectangular") ||
+				    0 == strcasecmp(szProjectionType, "spherical"))
+				    ProjectionType = 2;
+		    }
+	    }
+	}
+	// Try parsing the XMP content for supported maker's info.
+	struct ParseXMP	{
+		// try yo fetch the value both from the attribute and child element
+		// and parse if needed rational numbers stored as string fraction
+		static bool Value(const tinyxml2::XMLElement* document, const char* name, double& value) {
+			const char* szAttribute = document->Attribute(name);
+			if (szAttribute == NULL) {
+				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
+				if (element == NULL || (szAttribute=element->GetText()) == NULL)
+					return false;
+			}
+			std::vector<std::string> values;
+			Tools::strSplit(szAttribute, '/', values);
+			switch (values.size()) {
+			case 1: value = strtod(values.front().c_str(), NULL); return true;
+			case 2: value = strtod(values.front().c_str(), NULL)/strtod(values.back().c_str(), NULL); return true;
+			}
+			return false;
+		}
+		// same as previous function but with unsigned int results
+		static bool Value(const tinyxml2::XMLElement* document, const char* name, uint32_t& value) {
+			const char* szAttribute = document->Attribute(name);
+			if (szAttribute == NULL) {
+				const tinyxml2::XMLElement* const element(document->FirstChildElement(name));
+				if (element == NULL || (szAttribute = element->GetText()) == NULL)
+					return false;
+			}
+			value = strtoul(szAttribute, NULL, 0); return true;
+			return false;
+		}
+	};
+	const char* szAbout(document->Attribute("rdf:about"));
+	if (0 == strcasecmp(Make.c_str(), "DJI") || (szAbout != NULL && 0 == strcasecmp(szAbout, "DJI Meta Data"))) {
+		ParseXMP::Value(document, "drone-dji:AbsoluteAltitude", GeoLocation.Altitude);
+		ParseXMP::Value(document, "drone-dji:RelativeAltitude", GeoLocation.RelativeAltitude);
+		ParseXMP::Value(document, "drone-dji:GimbalRollDegree", GeoLocation.RollDegree);
+		ParseXMP::Value(document, "drone-dji:GimbalPitchDegree", GeoLocation.PitchDegree);
+		ParseXMP::Value(document, "drone-dji:GimbalYawDegree", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "drone-dji:CalibratedFocalLength", Calibration.FocalLength);
+		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterX", Calibration.OpticalCenterX);
+		ParseXMP::Value(document, "drone-dji:CalibratedOpticalCenterY", Calibration.OpticalCenterY);
+	} else if (0 == strcasecmp(Make.c_str(), "senseFly") || 0 == strcasecmp(Make.c_str(), "Sentera")) {
+		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree);
+		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree)) {
+			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
+			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
+		}
+		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "Camera:GPSXYAccuracy", GeoLocation.AccuracyXY);
+		ParseXMP::Value(document, "Camera:GPSZAccuracy", GeoLocation.AccuracyZ);
+	} else if (0 == strcasecmp(Make.c_str(), "PARROT")) {
+		ParseXMP::Value(document, "Camera:Roll", GeoLocation.RollDegree) ||
+		ParseXMP::Value(document, "drone-parrot:CameraRollDegree", GeoLocation.RollDegree);
+		if (ParseXMP::Value(document, "Camera:Pitch", GeoLocation.PitchDegree) ||
+			ParseXMP::Value(document, "drone-parrot:CameraPitchDegree", GeoLocation.PitchDegree)) {
+			// convert to DJI format: senseFly uses pitch 0 as NADIR, whereas DJI -90
+			GeoLocation.PitchDegree = Tools::NormD180(GeoLocation.PitchDegree-90.0);
+		}
+		ParseXMP::Value(document, "Camera:Yaw", GeoLocation.YawDegree) ||
+		ParseXMP::Value(document, "drone-parrot:CameraYawDegree", GeoLocation.YawDegree);
+		ParseXMP::Value(document, "Camera:AboveGroundAltitude", GeoLocation.RelativeAltitude);
+	}
+	ParseXMP::Value(document, "GPano:PosePitchDegrees", GPano.PosePitchDegrees);
+	ParseXMP::Value(document, "GPano:PoseRollDegrees", GPano.PoseRollDegrees);
+	// parse GCamera:MicroVideo
+	if (document->Attribute("GCamera:MicroVideo")) {
+		ParseXMP::Value(document, "GCamera:MicroVideo", MicroVideo.HasMicroVideo);
+		ParseXMP::Value(document, "GCamera:MicroVideoVersion", MicroVideo.MicroVideoVersion);
+		ParseXMP::Value(document, "GCamera:MicroVideoOffset", MicroVideo.MicroVideoOffset);
+	}
+#endif
+	return EXIF_PARSE_SUCCESS;
+}
+
+typedef struct xml_npv_s {
+    const char* n;
+    const char**v;
+    int32_t up; // for nested tags e.g.:
+    // <dc:creator><rdf:Seq><rdf:li>name</rdf:li></rdf:Seq></dc:creator>
+    // <rdf:Alt><rdf:li>...</rdf:li></rdf:Alt>
+    // <rdf:Bag><rdf:li>...</rdf:li></rdf:Bag>
+    int32_t append; // for appending lists like:
+    // <dc:subject><rdf:Bag>
+    //    <rdf:li>keyword1</rdf:li><rdf:li>keyword2</rdf:li>...
+    // </rdf:Bag></dc:subject>
+    const char* p; // parent for disambiguation
+} xml_npv_t;
+
+// https://stackoverflow.com/questions/29001433/how-rdfbag-rdfseq-and-rdfalt-is-different-while-using-them
+
+// xml_rdf_t represents rdf:Bag rdf:Seq and rdf:Alt
+// interpretation is left to the client.
+// UTF-8 "\x00\x00" terminated list of "\x00" terminated strings
+
+typedef const char* xml_rdf_t;
+typedef const char* xml_str_t;
+
+typedef struct xml_context_s {
+    yxml_t yxml;
+    exif_info_t* ei;
+    char* stack[64]; // element names stack
+    int32_t top;
+    xml_npv_t* npv;
+    int32_t npv_count;
+    int32_t index;
+} xml_context_t;
+
+static const char* yxml_parent(xml_context_t* ctx, int up) {
+    int sp = ctx->top - 1 - up;
+    return sp >= 0 ? ctx->stack[sp] : "";
+}
+
+static inline bool yxml_strequ(const char* s0, const char* s1) {
+    uint32_t l0 = (uint32_t)strlen(s0);
+    uint32_t l1 = (uint32_t)strlen(s1);
+    return l0 == l1 && memcmp(s0, s1, l0) == 0;
+}
+
+static void yxml_element_start(yxml_t* x) {
+    xml_context_t* ctx = (xml_context_t*)x;
+	assert(yxml_symlen(x, x->elem) == strlen(x->elem));
+    fatal_if(ctx->top >= countof(ctx->stack));
+    ctx->stack[ctx->top++] = x->elem;
+    for (int i = 0; i < ctx->npv_count && ctx->index < 0; i++) {
+        // if .up == 0 both up and top are the same and are top
+        //             element of the stack
+        // if .up > 0  up could be empty "" or parent/grandparent
+        //             of element
+        // In XMP spec the elements may have rdf:containers as content
+        //             but in the field broken writters may write single
+        //             item container as direct content.
+        const char* up  = yxml_parent(ctx, ctx->npv[i].up);
+        const char* top = yxml_parent(ctx, 0);
+        const char* name = ctx->npv[i].n;
+        if (yxml_strequ(up, name) || yxml_strequ(top, name)) {
+            const char* parent = ctx->npv[i].p;
+            bool has_parent = parent == null; // parent was not required
+            for (int p = ctx->top - 2; p >= 0 && !has_parent; p--) {
+                has_parent = yxml_strequ(ctx->stack[p], parent);
+            }
+            if (has_parent) {
+                assert(ctx->index < 0, "content nesting not supported");
+                if (!ctx->npv[i].append || *ctx->npv[i].v == null || *ctx->npv[i].v[0] == 0) {
+                    ctx->ei->next++; // extra zero byte after zero separated appended rdf:li
+                    *ctx->npv[i].v = ctx->ei->next;
+                } else { // appended values "\x00" separated:
+                    fatal_if(ctx->ei->next + 3 >= ctx->ei->strings + countof(ctx->ei->strings));
+                    memcpy(ctx->ei->next, "\x00\x00", 2); // including terminating double zero
+                    ctx->ei->next++; // only advance first "\x00" byte
+                }
+                ctx->index = i;
+//              if (strstr(top, "EventId") != null) { crt.breakpoint(); }
+            }
+        }
+    }
+}
+
+static void yxml_content(yxml_t* x) {
+    xml_context_t* ctx = (xml_context_t*)x;
+    if (ctx->index >= 0) {
+        char* p = ctx->yxml.data;
+        if (ctx->ei->next[0] == 0) { // skip starting white space bytes
+            while (isspace(*(uint8_t*)p)) { p++; }
+        }
+        const int64_t k = strlen((char*)p);
+        fatal_if(ctx->ei->next + k + 1 >= ctx->ei->strings + countof(ctx->ei->strings));
+        memcpy(ctx->ei->next, p, k + 1); // including terminating zero byte
+        ctx->ei->next += k;
+    }
+}
+
+static void yxml_element_end(yxml_t* x) {
+    xml_context_t* ctx = (xml_context_t*)x;
+    assert(ctx->top > 0);
+    const int i = ctx->index;
+    if (i >= 0) {
+        const char* top = yxml_parent(ctx, 0);
+//      if (strstr(top, "EventId") != null) { crt.breakpoint(); }
+        const char* name = ctx->npv[i].n;
+        if (yxml_strequ(top, name)) {
+            ctx->index = -1;
+        }
+        ctx->ei->next++; // double zero byte termination
+    }
+    ctx->top--;
+}
+
+static void yxml_xmp(yxml_t* x, yxml_ret_t r) {
+	switch(r) {
+	    case YXML_ELEMSTART: yxml_element_start(x); break;
+	    case YXML_CONTENT  : yxml_content(x);       break;
+	    case YXML_ELEMEND  : yxml_element_end(x);   break;
+        // ignored:
+	    case YXML_ATTRSTART:
+	    case YXML_ATTREND:
+	    case YXML_PICONTENT:
+	    case YXML_ATTRVAL:
+	    case YXML_PISTART:
+	    case YXML_PIEND:
+	    case YXML_OK:
+		    break;
+	    default:
+		    assert(false, "r: %d", r);
+	}
+}
+
+static const char* dump_exif_xmp_rdf2str(const char* rdf) {
+    static char append[1024];
+    char* p = append;
+    *p = 0;
+    while (*rdf != 0) {
+        char* s = (char*)rdf;
+        const int64_t k = strlen(s);
+        if (p == append) {
+            p += snprintf(p, append + sizeof(append) - p, "%s", s);
+        } else {
+            p += snprintf(p, append + sizeof(append) - p, "<|>%s", s);
+        }
+        rdf += k + 1;
+    }
+    return append;
+}
+
+static void dump_exif_xmp(exif_info_t* ei) {
+    #define dump(field) do { \
+        /* assert(ei->xmp.field != null && ei->xmp.field[0] != 0); */ \
+        traceln("%-55s: %s", #field, dump_exif_xmp_rdf2str(ei->xmp.field)); \
+    } while (0)
+    dump(Iptc4xmpCore.CountryCode);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrCity );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrCtry );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrExtadr);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrPcode);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiAdrRegion);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiEmailWork);
+    dump(Iptc4xmpCore.CreatorContactInfo.CiTelWork );
+    dump(Iptc4xmpCore.CreatorContactInfo.CiUrlWork );
+    dump(Iptc4xmpCore.IntellectualGenre);
+    dump(Iptc4xmpCore.Location);
+    dump(Iptc4xmpCore.Scene);
+    dump(Iptc4xmpCore.SubjectCode);
+    dump(Iptc4xmpExt.AOCopyrightNotice);
+    dump(Iptc4xmpExt.AOCreator);
+    dump(Iptc4xmpExt.AODateCreated);
+    dump(Iptc4xmpExt.AddlModelInfo);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCopyrightNotice);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCreator);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOContentDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOContributionDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCreatorId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerName);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorId);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorName);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOPhysicalDescription);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSource);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSourceInvNo);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOSourceInvURL);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOStylePeriod);
+    dump(Iptc4xmpExt.ArtworkOrObject.AOTitle);
+    dump(Iptc4xmpExt.DigImageGUID);
+    dump(Iptc4xmpExt.EmbdEncRightsExpr);
+    dump(Iptc4xmpExt.DigitalSourceType);
+    dump(Iptc4xmpExt.Event);
+    dump(Iptc4xmpExt.EventId);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.LinkedRightsExpr);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.RightsExprEncType);
+    dump(Iptc4xmpExt.LinkedEncRightsExpr.RightsExprLangId);
+    dump(Iptc4xmpExt.LocationCreated.City);
+    dump(Iptc4xmpExt.LocationCreated.CountryCode);
+    dump(Iptc4xmpExt.LocationCreated.CountryName);
+    dump(Iptc4xmpExt.LocationCreated.ProvinceState);
+    dump(Iptc4xmpExt.LocationCreated.Sublocation);
+    dump(Iptc4xmpExt.LocationCreated.WorldRegion);
+    dump(Iptc4xmpExt.LocationShown.City);
+    dump(Iptc4xmpExt.LocationShown.CountryCode);
+    dump(Iptc4xmpExt.LocationShown.CountryName);
+    dump(Iptc4xmpExt.LocationShown.ProvinceState);
+    dump(Iptc4xmpExt.LocationShown.Sublocation);
+    dump(Iptc4xmpExt.LocationShown.WorldRegion);
+    dump(Iptc4xmpExt.MaxAvailHeight);
+    dump(Iptc4xmpExt.MaxAvailWidth);
+    dump(Iptc4xmpExt.ModelAge);
+    dump(Iptc4xmpExt.OrganisationInImageCode);
+    dump(Iptc4xmpExt.OrganisationInImageName);
+    dump(Iptc4xmpExt.PersonInImage);
+    dump(Iptc4xmpExt.PersonCharacteristic);
+    dump(Iptc4xmpExt.PersonDescription);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonCharacteristic);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonDescription);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonId);
+    dump(Iptc4xmpExt.PersonInImageWDetails.PersonName);
+    dump(Iptc4xmpExt.ProductInImage.ProductDescription);
+    dump(Iptc4xmpExt.ProductInImage.ProductGTIN);
+    dump(Iptc4xmpExt.ProductInImage.ProductId);
+    dump(Iptc4xmpExt.ProductInImage.ProductName);
+    dump(Iptc4xmpExt.RegistryId.RegItemId);
+    dump(Iptc4xmpExt.RegistryId.RegOrgId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermId);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermName);
+    dump(Iptc4xmpExt.AboutCvTerm.CvTermRefinedAbout);
+    dump(dc.creator);
+    dump(dc.date);
+    dump(dc.format);
+    dump(dc.description);
+    dump(dc.rights);
+    dump(dc.subject);
+    dump(dc.title);
+    dump(Lens);
+    dump(exif.GPSAltitude);
+    dump(exif.GPSAltitudeRef);
+    dump(exif.GPSLatitude);
+    dump(exif.GPSLongitude);
+    dump(CreateDate);
+    dump(CreatorTool);
+    dump(MetadataDate);
+    dump(ModifyDate);
+    dump(Rating);
+}
+
+static int parse_xmp_xml(exif_info_t* ei, const char* xml, uint32_t bytes) {
+    parse_xmp_legacy(ei, xml, bytes);
+    xml_context_t context = {0};
+    context.ei = ei;
+    char xml_stack[8 * 1024];
+	yxml_init(&context.yxml, xml_stack, sizeof(xml_stack));
+    // nvp O(n^2) not a performance champion. Can be optimized using hashmaps
+    xml_npv_t npv[] = {
+        { "Iptc4xmpCore:CiAdrCity"  , &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrCity  },
+        { "Iptc4xmpCore:CiAdrCtry"  , &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrCtry  },
+        { "Iptc4xmpCore:CiAdrExtadr", &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrExtadr},
+        { "Iptc4xmpCore:CiAdrPcode" , &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrPcode },
+        { "Iptc4xmpCore:CiAdrRegion", &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiAdrRegion},
+        { "Iptc4xmpCore:CiEmailWork", &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiEmailWork},
+        { "Iptc4xmpCore:CiTelWork"  , &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiTelWork  },
+        { "Iptc4xmpCore:CiUrlWork"  , &ei->xmp.Iptc4xmpCore.CreatorContactInfo.CiUrlWork  },
+
+        { "Iptc4xmpCore:IntellectualGenre" , &ei->xmp.Iptc4xmpCore.IntellectualGenre },
+        { "Iptc4xmpCore:Location"          , &ei->xmp.Iptc4xmpCore.Location },
+        { "Iptc4xmpCore:Scene"             , &ei->xmp.Iptc4xmpCore.Scene },
+        { "Iptc4xmpCore:SubjectCode"       , &ei->xmp.Iptc4xmpCore.SubjectCode },
+
+        { "Iptc4xmpExt:AOCopyrightNotice"           , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCopyrightNotice, 0, false, "Iptc4xmpExt:ArtworkOrObject" },
+        { "Iptc4xmpExt:AOCreator"                   , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCreator,         0, false, "Iptc4xmpExt:ArtworkOrObject" },
+        { "Iptc4xmpExt:AOCircaDateCreated"          , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCircaDateCreated },
+        { "Iptc4xmpExt:AOContentDescription"        , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOContentDescription, 2 },
+        { "Iptc4xmpExt:AOContributionDescription"   , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOContributionDescription, 2 },
+        { "Iptc4xmpExt:AOCreatorId"                 , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCreatorId, 2 },
+
+        { "Iptc4xmpExt:AOCurrentCopyrightOwnerId"   , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerId },
+        { "Iptc4xmpExt:AOCurrentCopyrightOwnerName" , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentCopyrightOwnerName },
+        { "Iptc4xmpExt:AOCurrentLicensorId"         , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorId},
+        { "Iptc4xmpExt:AOCurrentLicensorName"       , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOCurrentLicensorName},
+
+        { "Iptc4xmpExt:AOPhysicalDescription"       , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOPhysicalDescription, 2 },
+        { "Iptc4xmpExt:AOSource"                    , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOSource},
+        { "Iptc4xmpExt:AOSourceInvNo"               , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOSourceInvNo},
+        { "Iptc4xmpExt:AOSourceInvURL"              , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOSourceInvURL},
+        { "Iptc4xmpExt:AOStylePeriod"               , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOStylePeriod, 2},
+        { "Iptc4xmpExt:AOTitle"                     , &ei->xmp.Iptc4xmpExt.ArtworkOrObject.AOTitle, 2},
+
+        { "Iptc4xmpExt:DigImageGUID"                , &ei->xmp.Iptc4xmpExt.DigImageGUID},
+        { "Iptc4xmpExt:EmbdEncRightsExpr"           , &ei->xmp.Iptc4xmpExt.EmbdEncRightsExpr, 2},
+        { "Iptc4xmpExt:DigitalSourceType"           , &ei->xmp.Iptc4xmpExt.DigitalSourceType},
+        { "Iptc4xmpExt:Event"                       , &ei->xmp.Iptc4xmpExt.Event, 2},
+        { "Iptc4xmpExt:EventId"                     , &ei->xmp.Iptc4xmpExt.EventId, 2},
+
+        { "Iptc4xmpExt:LinkedRightsExpr"        , &ei->xmp.Iptc4xmpExt.LinkedEncRightsExpr.LinkedRightsExpr,  0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+        { "Iptc4xmpExt:RightsExprEncType"       , &ei->xmp.Iptc4xmpExt.LinkedEncRightsExpr.RightsExprEncType, 0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+        { "Iptc4xmpExt:RightsExprLangId"        , &ei->xmp.Iptc4xmpExt.LinkedEncRightsExpr.RightsExprLangId,  0, false, "Iptc4xmpExt:LinkedEncRightsExpr"},
+
+        { "Iptc4xmpExt:City"                    , &ei->xmp.Iptc4xmpExt.LocationCreated.City,          0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:CountryCode"             , &ei->xmp.Iptc4xmpExt.LocationCreated.CountryCode,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:CountryName"             , &ei->xmp.Iptc4xmpExt.LocationCreated.CountryName,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:ProvinceState"           , &ei->xmp.Iptc4xmpExt.LocationCreated.ProvinceState, 0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:Sublocation"             , &ei->xmp.Iptc4xmpExt.LocationCreated.Sublocation,   0, false, "Iptc4xmpExt:LocationCreated"},
+        { "Iptc4xmpExt:WorldRegion"             , &ei->xmp.Iptc4xmpExt.LocationCreated.WorldRegion,   0, false, "Iptc4xmpExt:LocationCreated"},
+
+        { "Iptc4xmpExt:City"                    , &ei->xmp.Iptc4xmpExt.LocationShown.City,          0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:CountryCode"             , &ei->xmp.Iptc4xmpExt.LocationShown.CountryCode,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:CountryName"             , &ei->xmp.Iptc4xmpExt.LocationShown.CountryName,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:ProvinceState"           , &ei->xmp.Iptc4xmpExt.LocationShown.ProvinceState, 0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:Sublocation"             , &ei->xmp.Iptc4xmpExt.LocationShown.Sublocation,   0, false, "Iptc4xmpExt:LocationShown"},
+        { "Iptc4xmpExt:WorldRegion"             , &ei->xmp.Iptc4xmpExt.LocationShown.WorldRegion,   0, false, "Iptc4xmpExt:LocationShown"},
+
+        { "Iptc4xmpExt:MaxAvailHeight"          , &ei->xmp.Iptc4xmpExt.MaxAvailHeight},
+        { "Iptc4xmpExt:MaxAvailWidth"           , &ei->xmp.Iptc4xmpExt.MaxAvailWidth},
+        { "Iptc4xmpExt:ModelAge"                , &ei->xmp.Iptc4xmpExt.ModelAge},
+
+        { "Iptc4xmpExt:PersonCharacteristic" , &ei->xmp.Iptc4xmpExt.PersonInImageWDetails.PersonCharacteristic, 7, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonDescription"    , &ei->xmp.Iptc4xmpExt.PersonInImageWDetails.PersonDescription,    2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonId"             , &ei->xmp.Iptc4xmpExt.PersonInImageWDetails.PersonId,             2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+        { "Iptc4xmpExt:PersonName"           , &ei->xmp.Iptc4xmpExt.PersonInImageWDetails.PersonName,           2, true, "Iptc4xmpExt:PersonInImageWDetails"},
+
+        { "Iptc4xmpExt:ProductDescription"   , &ei->xmp.Iptc4xmpExt.ProductInImage.ProductDescription, 2, true,  "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductGTIN"          , &ei->xmp.Iptc4xmpExt.ProductInImage.ProductGTIN,        0, false, "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductId"            , &ei->xmp.Iptc4xmpExt.ProductInImage.ProductId,          0, false, "Iptc4xmpExt:ProductInImage"},
+        { "Iptc4xmpExt:ProductName"          , &ei->xmp.Iptc4xmpExt.ProductInImage.ProductName,        2, true,  "Iptc4xmpExt:ProductInImage"},
+
+        { "Iptc4xmpExt:OrganisationInImageCode" , &ei->xmp.Iptc4xmpExt.OrganisationInImageCode, 2},
+        { "Iptc4xmpExt:OrganisationInImageName" , &ei->xmp.Iptc4xmpExt.OrganisationInImageName, 2},
+        { "Iptc4xmpExt:PersonInImage"           , &ei->xmp.Iptc4xmpExt.PersonInImage,           2},
+        { "Iptc4xmpExt:PersonCharacteristic"    , &ei->xmp.Iptc4xmpExt.PersonCharacteristic,    2},
+        { "Iptc4xmpExt:PersonDescription"       , &ei->xmp.Iptc4xmpExt.PersonDescription,       2},
+
+        { "Iptc4xmpExt:RegItemId"            , &ei->xmp.Iptc4xmpExt.RegistryId.RegItemId},
+        { "Iptc4xmpExt:RegOrgId"             , &ei->xmp.Iptc4xmpExt.RegistryId.RegOrgId},
+
+        { "Iptc4xmpExt:CvId"                 , &ei->xmp.Iptc4xmpExt.AboutCvTerm.CvId,               0, false, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermId"             , &ei->xmp.Iptc4xmpExt.AboutCvTerm.CvTermId,           0, false, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermName"           , &ei->xmp.Iptc4xmpExt.AboutCvTerm.CvTermName,         2, true, "Iptc4xmpExt:AboutCvTerm"},
+        { "Iptc4xmpExt:CvTermRefinedAbout"   , &ei->xmp.Iptc4xmpExt.AboutCvTerm.CvTermRefinedAbout, 0, false, "Iptc4xmpExt:AboutCvTerm"},
+
+        { "dc:creator"              , &ei->xmp.dc.creator,      2, true },
+        { "dc:date"                 , &ei->xmp.dc.date,         2, true },
+        { "dc:format"               , &ei->xmp.dc.format},
+        { "dc:description"          , &ei->xmp.dc.description,  2, true },
+        { "dc:rights"               , &ei->xmp.dc.rights,       2, true },
+        { "dc:subject"              , &ei->xmp.dc.subject,      2, true },
+        { "dc:title"                , &ei->xmp.dc.title,        2, true },
+
+        { "aux:Lens"                , &ei->xmp.Lens },
+
+        { "exif:GPSAltitude"        , &ei->xmp.exif.GPSAltitude },
+        { "exif:GPSAltitudeRef"     , &ei->xmp.exif.GPSAltitudeRef },
+        { "exif:GPSLatitude"        , &ei->xmp.exif.GPSLatitude },
+        { "exif:GPSLongitude"       , &ei->xmp.exif.GPSLongitude },
+
+        { "xmp:CreateDate"          , &ei->xmp.CreateDate },
+        { "xmp:CreatorTool"         , &ei->xmp.CreatorTool },
+        { "xmp:MetadataDate"        , &ei->xmp.MetadataDate },
+        { "xmp:ModifyDate"          , &ei->xmp.ModifyDate },
+        { "xmp:Rating"              , &ei->xmp.Rating },
+
+        // for disambiguation non-parented items must apprear last in the list
+        { "Iptc4xmpExt:AOCopyrightNotice"           , &ei->xmp.Iptc4xmpExt.AOCopyrightNotice },
+        { "Iptc4xmpExt:AOCreator"                   , &ei->xmp.Iptc4xmpExt.AOCreator         },
+        { "Iptc4xmpExt:AODateCreated"               , &ei->xmp.Iptc4xmpExt.AODateCreated },
+        { "Iptc4xmpExt:AddlModelInfo"               , &ei->xmp.Iptc4xmpExt.AddlModelInfo },
+
+        { "Iptc4xmpCore:CountryCode", &ei->xmp.Iptc4xmpCore.CountryCode }
+    };
+    context.npv = npv;
+    context.npv_count = countof(npv);
+    context.index = -1;
+    yxml_ret_t r = YXML_OK;
+    for (uint32_t i = 0; i < bytes; i++) {
+		r = yxml_parse(&context.yxml, xml[i]);
+        if (r >= 0) {
+		    yxml_xmp(&context.yxml, r);
+        } else {
+            break;
+        }
+    }
+    r = yxml_eof(&context.yxml);
+    for (int32_t i = 0; i < context.npv_count; i++) {
+        if (*context.npv[i].v == null) {
+            *context.npv[i].v = "\x00\x00";
+            // much easier for the clients to handle
+        }
+    }
+    if (ei->dump) {
+        dump_exif_xmp(ei);
+    }
+    assert(r == YXML_OK);
+    return r == YXML_OK ? EXIF_PARSE_SUCCESS : EXIF_PARSE_CORRUPT_DATA;
 }
 
 typedef struct exif_stream_buffer_s {
@@ -1359,3 +1786,5 @@ int exif_from_stream(exif_info_t* ei, exif_stream_t* stream) {
 int exif_from_memory(exif_info_t* ei, const uint8_t* data, uint32_t length) {
     return exif_parse_from_memory(ei, data, length);
 }
+
+
